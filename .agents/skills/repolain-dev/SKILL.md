@@ -1,15 +1,15 @@
 ---
-name: repo-lens-dev
-description: Use this skill when implementing or modifying Repo Lens, a TypeScript monorepo for repository scanning, codebase explanation, file mapping, knowledge matching, VS Code integration, and MCP tools.
+name: repolain-dev
+description: Use this skill when implementing or modifying Repolain, a TypeScript monorepo for repository scanning, codebase explanation, file mapping, knowledge matching, VS Code integration, and MCP tools.
 ---
 
-# Repo Lens Development Skill
+# Repolain Development Skill
 
 ## Purpose
 
-Use this skill to implement features for Repo Lens.
+Use this skill to implement features for Repolain.
 
-Repo Lens is a repository understanding tool. It should produce reliable, evidence-based explanations of codebases.
+Repolain is a repository understanding tool. It should produce reliable, evidence-based explanations of codebases.
 
 The core principle is:
 

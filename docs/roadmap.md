@@ -8,7 +8,7 @@ Deliverables:
 - `docs/architecture.md`
 - `docs/roadmap.md`
 - `docs/prompts.md`
-- `.agents/skills/repo-lens-dev/SKILL.md`
+- `.agents/skills/repolain-dev/SKILL.md`
 
 Acceptance:
 

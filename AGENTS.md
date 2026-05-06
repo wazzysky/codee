@@ -1,5 +1,257 @@
 # AGENTS.md
 
+## 中文
+
+### 项目概览
+
+这个仓库实现的是 **Repolain**，一个代码仓库理解工具。
+
+Repolain 会扫描代码仓库，识别语言、框架和工具链，构建结构化索引，解释项目与文件角色，把文件映射到知识点，并支持代码仓库问答。
+
+产品建议按以下顺序演进：
+
+1. CLI 核心
+2. 仓库扫描器
+3. 项目识别器
+4. 文件地图生成器
+5. Markdown 报告导出
+6. SQLite 索引
+7. 符号提取
+8. 知识点匹配
+9. LLM 辅助解释
+10. VS Code 扩展
+11. MCP server
+
+第一个可用目标是一个可以生成高质量 `repo-summary.md` 的 CLI。
+
+---
+
+### 架构规则
+
+仓库应组织为 pnpm monorepo。
+
+期望结构：
+
+```text
+packages/
+  core/              # 扫描、识别、解析、索引、知识匹配
+  cli/               # 仅命令行接口
+  vscode-extension/  # 仅 VS Code 集成
+  mcp-server/        # 仅 MCP 封装
+  knowledge-base/    # 内置知识点定义
+docs/
+  architecture.md
+  roadmap.md
+  prompts.md
+examples/
+  simple-python/
+  simple-cpp/
+  ros2-demo/
+tests/
+```
+
+规则：
+
+- 核心逻辑必须放在 `packages/core`
+- CLI 只负责解析参数、调用 core API 和格式化输出
+- VS Code 扩展不得重复 scanner/parser/indexer 逻辑
+- MCP server 必须包装 core API，而不是重写实现
+- 所有 LLM 调用必须经过厂商无关的 `LlmClient` 接口
+- 测试中绝不能调用真实 LLM API
+- 仓库扫描绝不能执行被扫描仓库的代码
+- 除非明确要求，否则避免大范围重写
+
+---
+
+### 语言与工具
+
+使用：
+
+- TypeScript
+- pnpm workspace
+- strict TypeScript
+- vitest
+- commander
+- fast-glob
+- zod
+- SQLite
+- 后续阶段使用 Tree-sitter 或等价解析器做符号提取
+
+优先命令：
+
+```bash
+pnpm install
+pnpm build
+pnpm test
+pnpm lint
+```
+
+如果某个命令还不存在，在引入相关 package 时一并补上。
+
+---
+
+### 安全规则
+
+Repolain 会读取任意仓库，因此安全性很重要。
+
+禁止：
+
+- 在扫描过程中执行目标仓库脚本
+- 读取仓库根目录之外的文件
+- 在未显式启用时跟随指向仓库外的符号链接
+- 把 secret 发送给 LLM provider
+- 记录 API key、token、证书、私钥或 `.env` 内容
+
+默认忽略路径：
+
+```text
+.git
+node_modules
+dist
+build
+out
+coverage
+__pycache__
+.venv
+venv
+.cache
+.next
+.nuxt
+target
+*.bag
+*.pt
+*.pth
+*.onnx
+*.bin
+*.zip
+*.tar
+*.tar.gz
+```
+
+默认敏感文件：
+
+```text
+.env
+.env.*
+*.pem
+*.key
+*.crt
+id_rsa
+id_ed25519
+credentials.*
+secrets.*
+```
+
+---
+
+### MVP 范围
+
+当前 MVP：
+
+- `repolain scan <path>`
+- `repolain summary <path>`
+- `repolain file-map <path>`
+- `repolain explain <file>`
+- `repolain knowledge <path>`
+- `repolain export <path> --format markdown`
+
+MVP 输出应包括：
+
+- 项目类型
+- 语言统计
+- 框架/工具链识别
+- 可疑生成器/模板来源
+- 目录角色
+- 重要文件
+- 文件角色解释
+- 入口候选
+- 基础知识点匹配
+- uncertainties 与 evidence
+
+MVP 不包括：
+
+- 全自动代码修改
+- 完整语义类型分析
+- 完整调用图
+- 所有编程语言支持
+- 复杂 Webview UI
+- 云同步
+- 团队协作特性
+
+---
+
+### 编码规范
+
+- 使用显式 TypeScript 类型
+- 外部输入必须通过 `zod` 校验
+- `packages/core` 优先采用纯函数
+- 副作用尽量留在 CLI / service 边界
+- 每个新模块都要补测试
+- 为 scanner、detector、parser 添加 fixtures
+- 对外函数必须有清晰接口
+- 错误信息必须可操作
+- 不要静默吞错；用 diagnostics 返回部分失败
+
+---
+
+### 测试要求
+
+每个功能至少覆盖：
+
+- 正常输入
+- 空输入
+- 非法路径/输入
+- 忽略文件
+- 跨平台路径
+- 确定性输出
+- 错误处理
+
+测试中不要使用真实 API key。
+
+AI 相关测试必须使用 mock LLM client。
+
+---
+
+### 输出风格
+
+CLI 输出应支持：
+
+- JSON，供机器使用
+- Markdown，供人工阅读
+- 简洁终端摘要
+
+所有 AI 生成结论都应包含：
+
+- confidence
+- evidence
+- 必要时给出 uncertainty
+- 源文件路径
+
+不要把猜测表达成事实。
+
+---
+
+### 完成标准
+
+一个任务只有在满足以下条件后才算完成：
+
+- 代码能构建
+- 测试通过
+- 新行为已文档化
+- 相关示例或 fixtures 已更新
+- 适用时已对 CLI 输出做手工 sanity check
+- 安全假设未被破坏
+
+实现任务时，最后应总结：
+
+- 改动文件
+- 新命令
+- 新增测试
+- 限制
+- 推荐的下一步任务
+
+## English
+
 ## Project Overview
 
 This repository implements **Repolain**, a repository understanding tool.
