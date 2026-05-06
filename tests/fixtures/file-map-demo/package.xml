@@ -1,0 +1,7 @@
+<package format="3">
+  <name>file_map_demo</name>
+  <version>0.0.1</version>
+  <description>File map demo</description>
+  <maintainer email="dev@example.com">Dev</maintainer>
+  <license>MIT</license>
+</package>

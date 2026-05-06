@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.8)
+project(knowledge_demo)
+find_package(ament_cmake REQUIRED)
+add_executable(pid_controller src/pid_controller.cpp)
+ament_package()

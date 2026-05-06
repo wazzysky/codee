@@ -1,0 +1,7 @@
+<package format="3">
+  <name>ros_ambiguous</name>
+  <version>0.0.1</version>
+  <description>Ambiguous ROS package</description>
+  <maintainer email="dev@example.com">Dev</maintainer>
+  <license>MIT</license>
+</package>

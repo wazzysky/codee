@@ -1,0 +1,30 @@
+{
+  "name": "repolain",
+  "version": "0.1.0",
+  "description": "CLI-first repository understanding tool for scanning, summarizing, mapping, and indexing codebases.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "repolain": "dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm run build"
+  },
+  "keywords": [
+    "cli",
+    "repository",
+    "analysis",
+    "typescript",
+    "codebase"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@repolain/core": "workspace:*",
+    "commander": "^13.1.0"
+  }
+}

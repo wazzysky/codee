@@ -1,0 +1,6 @@
+[project]
+name = "python-uv-pip"
+version = "0.1.0"
+
+[tool.uv]
+managed = true

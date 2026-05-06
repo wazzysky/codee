@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/knowledge-base"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/cli"
+    }
+  ]
+}

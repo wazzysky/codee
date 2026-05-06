@@ -1,0 +1,29 @@
+{
+  "name": "@repolain/core",
+  "version": "0.1.0",
+  "description": "Core scanning, detection, mapping, knowledge matching, explanation, and indexing engine for Repolain.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@repolain/knowledge-base": "workspace:*",
+    "fast-glob": "^3.3.3",
+    "zod": "^3.24.1"
+  }
+}

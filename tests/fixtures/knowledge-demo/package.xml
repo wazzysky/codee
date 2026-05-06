@@ -1,0 +1,8 @@
+<package format="3">
+  <name>knowledge_demo</name>
+  <version>0.0.1</version>
+  <description>Knowledge demo</description>
+  <maintainer email="dev@example.com">Dev</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+</package>

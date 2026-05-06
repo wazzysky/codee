@@ -1,0 +1,19 @@
+{
+  "name": "repolain",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r build",
+    "test": "corepack pnpm exec vitest run",
+    "lint": "corepack pnpm -r exec tsc --noEmit",
+    "release:check": "corepack pnpm lint && corepack pnpm build && corepack pnpm test",
+    "pack:cli": "corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts",
+    "pack:packages": "corepack pnpm --dir packages/knowledge-base pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/core pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts"
+  }
+}

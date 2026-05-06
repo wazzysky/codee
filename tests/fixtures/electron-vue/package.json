@@ -1,0 +1,9 @@
+{
+  "name": "electron-vue",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "electron": "^31.0.0",
+    "vue": "^3.5.0"
+  }
+}

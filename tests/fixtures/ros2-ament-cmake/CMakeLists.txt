@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.8)
+project(ros2_ament_cmake)
+find_package(ament_cmake REQUIRED)
+add_executable(node src/node.cpp)
+ament_package()
