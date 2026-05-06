@@ -13,8 +13,20 @@ This validates:
 - TypeScript type checking
 - package builds
 - test suite
+- publishable package packaging via workspace metadata
 
-## 2. Create local installable tarballs
+## 2. Authenticate npm
+
+Run:
+
+```bash
+npm login
+npm whoami
+```
+
+`npm whoami` must return your npm username before you attempt a real publish.
+
+## 3. Create local installable tarballs
 
 Create only the user-facing CLI tarball:
 
@@ -34,7 +46,7 @@ The tarballs are written to:
 .artifacts/
 ```
 
-## 3. Test local installation
+## 4. Test local installation
 
 Example:
 
@@ -49,7 +61,17 @@ If you do not want a global install, you can also test with:
 npx ./.artifacts/repolain-0.1.0.tgz --help
 ```
 
-## 4. Publish order
+## 5. Dry-run the publish
+
+Validate publish packaging without uploading:
+
+```bash
+corepack pnpm publish:dry-run
+```
+
+This is the safest way to confirm the monorepo publish order and workspace dependency rewriting.
+
+## 6. Publish order
 
 Because the CLI depends on workspace packages, publish in this order:
 
@@ -60,17 +82,18 @@ Because the CLI depends on workspace packages, publish in this order:
 Example workflow:
 
 ```bash
-cd packages/knowledge-base
-npm publish --access public
-
-cd ../core
-npm publish --access public
-
-cd ../cli
-npm publish
+corepack pnpm --filter @repolain/knowledge-base publish --access public --no-git-checks
+corepack pnpm --filter @repolain/core publish --access public --no-git-checks
+corepack pnpm --filter repolain publish --access public --no-git-checks
 ```
 
-## 5. Versioning guidance
+Or use the root convenience script:
+
+```bash
+corepack pnpm publish:packages
+```
+
+## 7. Versioning guidance
 
 For now, keep versions aligned across packages:
 
@@ -84,18 +107,23 @@ Before each public release:
 - rebuild
 - rerun tests
 - pack locally and verify install
+- run the dry-run publish once
 
-## 6. Publish to GitHub
+## 8. Package name checks
 
-This repository does not currently have a GitHub remote configured. To publish it:
+Before the first release, verify these names are available or already owned by you:
 
 ```bash
-git remote add origin git@github.com:<your-account>/repolain.git
-git branch -M main
-git add .
-git commit -m "Initial Repolain release"
-git push -u origin main
+npm view repolain version
+npm view @repolain/core version
+npm view @repolain/knowledge-base version
 ```
+
+If a package does not exist yet, npm will return a 404-style error. If it exists and is not yours, you need a different name.
+
+## 9. Publish to GitHub
+
+Push your current default branch to GitHub before publishing packages.
 
 After the push succeeds, other users can:
 
@@ -105,7 +133,15 @@ After the push succeeds, other users can:
 
 If you want GitHub release assets, create a release and attach files from `.artifacts/`.
 
-## 7. Future growth
+## 10. Current blockers to check manually
+
+- npm account authentication on the publishing machine
+- package name availability on the npm registry
+- license choice for public distribution
+
+`LICENSE` is now included in the repository and package metadata uses `MIT`.
+
+## 11. Future growth
 
 This structure is already compatible with adding:
 

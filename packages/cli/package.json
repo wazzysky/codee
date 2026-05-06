@@ -2,6 +2,16 @@
   "name": "repolain",
   "version": "0.1.0",
   "description": "CLI-first repository understanding tool for scanning, summarizing, mapping, and indexing codebases.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wazzysky/codee.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/wazzysky/codee",
+  "bugs": {
+    "url": "https://github.com/wazzysky/codee/issues"
+  },
   "type": "module",
   "files": [
     "dist"
@@ -22,6 +32,9 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@repolain/core": "workspace:*",

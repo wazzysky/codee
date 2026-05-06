@@ -2,6 +2,16 @@
   "name": "@repolain/knowledge-base",
   "version": "0.1.0",
   "description": "Built-in rule-based knowledge point definitions used by Repolain.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wazzysky/codee.git",
+    "directory": "packages/knowledge-base"
+  },
+  "homepage": "https://github.com/wazzysky/codee",
+  "bugs": {
+    "url": "https://github.com/wazzysky/codee/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

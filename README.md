@@ -2,6 +2,10 @@
 
 Repolain is a CLI-first repository understanding tool.
 
+Public npm package:
+
+- `repolain`
+
 ## Install
 
 After publishing, users can install the CLI with:
@@ -10,9 +14,16 @@ After publishing, users can install the CLI with:
 npm install -g repolain
 ```
 
-## Current Phase
+Before the first npm release on a new machine:
 
-Phase 2 currently provides:
+```bash
+npm login
+npm whoami
+```
+
+## Current Capabilities
+
+Current release provides:
 
 - pnpm monorepo scaffold
 - `packages/core` repository scanner
@@ -31,6 +42,7 @@ corepack pnpm install
 corepack pnpm build
 corepack pnpm test
 corepack pnpm pack:cli
+corepack pnpm publish:dry-run
 node packages/cli/dist/bin.js scan examples/simple-python
 node packages/cli/dist/bin.js summary tests/fixtures/node-react-vite
 node packages/cli/dist/bin.js file-map tests/fixtures/file-map-demo
@@ -76,6 +88,16 @@ To create a local installable CLI tarball:
 corepack pnpm pack:cli
 ```
 
+To validate publish packaging without uploading anything:
+
+```bash
+corepack pnpm publish:dry-run
+```
+
 For the full publishing workflow, see:
 
 - [docs/publishing.md](/home/xhn/Projects/codee/docs/publishing.md:1)
+
+For the `v0.1.0` GitHub release notes, see:
+
+- [docs/release-v0.1.0.md](/home/xhn/Projects/codee/docs/release-v0.1.0.md:1)

@@ -2,6 +2,15 @@
   "name": "repolain",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wazzysky/codee.git"
+  },
+  "homepage": "https://github.com/wazzysky/codee",
+  "bugs": {
+    "url": "https://github.com/wazzysky/codee/issues"
+  },
   "packageManager": "pnpm@10.0.0",
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -14,6 +23,8 @@
     "lint": "corepack pnpm -r exec tsc --noEmit",
     "release:check": "corepack pnpm lint && corepack pnpm build && corepack pnpm test",
     "pack:cli": "corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts",
-    "pack:packages": "corepack pnpm --dir packages/knowledge-base pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/core pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts"
+    "pack:packages": "corepack pnpm --dir packages/knowledge-base pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/core pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts",
+    "publish:dry-run": "corepack pnpm --filter @repolain/knowledge-base publish --access public --dry-run --no-git-checks && corepack pnpm --filter @repolain/core publish --access public --dry-run --no-git-checks && corepack pnpm --filter repolain publish --access public --dry-run --no-git-checks",
+    "publish:packages": "corepack pnpm --filter @repolain/knowledge-base publish --access public --no-git-checks && corepack pnpm --filter @repolain/core publish --access public --no-git-checks && corepack pnpm --filter repolain publish --access public --no-git-checks"
   }
 }
