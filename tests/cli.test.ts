@@ -1,10 +1,13 @@
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  renderDependencyGraphMarkdown,
   renderExplainMarkdown,
   renderFileMapMarkdown,
   renderIndexSummaryMarkdown,
   renderKnowledgeMarkdown,
+  renderSearchMarkdown,
+  renderSymbolsMarkdown,
   runCli
 } from "../packages/cli/src/index";
 import { promises as fs } from "node:fs";
@@ -298,6 +301,10 @@ describe("CLI", () => {
       changedFiles: 2,
       removedFiles: 1,
       knowledgeMatchCount: 7,
+      symbolCount: 12,
+      referenceCount: 9,
+      symbolLinkCount: 4,
+      dependencyCount: 5,
       diagnosticCount: 0,
       projectTypes: ["Python project"]
     });
@@ -305,5 +312,119 @@ describe("CLI", () => {
     expect(markdown).toContain("# Index Summary");
     expect(markdown).toContain("Database: `/tmp/repo/.repolain/index.sqlite`");
     expect(markdown).toContain("Changed Files: 2");
+  });
+
+  it("emits JSON for symbols when requested", async () => {
+    const capture = createCaptureIo();
+
+    const exitCode = await runCli(
+      ["node", "repolain", "symbols", fixturePath("structure-demo"), "--json"],
+      capture.io
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(capture.readStdout())).toEqual(
+      expect.objectContaining({
+        root: fixturePath("structure-demo"),
+        files: expect.any(Array),
+        diagnostics: expect.any(Array)
+      })
+    );
+  });
+
+  it("renders Symbols Markdown deterministically", () => {
+    const markdown = renderSymbolsMarkdown("/tmp/repo", [
+      {
+        filePath: "src/main.py",
+        language: "Python",
+        parser: "regex-python",
+        symbols: [{ name: "main", kind: "function", startLine: 1, endLine: 3 }],
+        references: [{ name: "helper", kind: "call", line: 2, evidence: "regex: helper()" }],
+        importBindings: [],
+        imports: [],
+        entryHints: [],
+        diagnostics: []
+      }
+    ]);
+
+    expect(markdown).toContain("# Symbols");
+    expect(markdown).toContain("| function | main |");
+  });
+
+  it("emits Mermaid for graph when requested", async () => {
+    const capture = createCaptureIo();
+
+    const exitCode = await runCli(
+      ["node", "repolain", "graph", fixturePath("structure-demo"), "--mermaid"],
+      capture.io
+    );
+
+    expect(exitCode).toBe(0);
+    expect(capture.readStdout()).toContain("```mermaid");
+  });
+
+  it("renders Dependency Graph Markdown deterministically", () => {
+    const markdown = renderDependencyGraphMarkdown({
+      root: "/tmp/repo",
+      nodes: [{ path: "src/main.ts", language: "TypeScript" }],
+      edges: [
+        {
+          sourcePath: "src/main.ts",
+          targetPath: "src/lib.ts",
+          specifier: "./lib",
+          kind: "import",
+          line: 1,
+          resolution: "internal",
+          from: "src/main.ts",
+          to: "src/lib.ts",
+          type: "import",
+          resolved: true,
+          confidence: 0.93,
+          evidence: ["Resolved relative script import."]
+        }
+      ],
+      diagnostics: []
+    });
+
+    expect(markdown).toContain("# Dependency Graph");
+    expect(markdown).toContain("| src/main.ts | src/lib.ts | ./lib |");
+  });
+
+  it("emits Markdown for search by default", async () => {
+    const capture = createCaptureIo();
+
+    const exitCode = await runCli(
+      ["node", "repolain", "search", fixturePath("knowledge-demo"), "EKF"],
+      capture.io
+    );
+
+    expect(exitCode).toBe(0);
+    expect(capture.readStdout()).toContain("# Search Results");
+    expect(capture.readStdout()).toContain("src/ekf_fusion.py");
+  });
+
+  it("renders Search Markdown deterministically", () => {
+    const markdown = renderSearchMarkdown("/tmp/repo", [
+      {
+        path: "src/ekf.py",
+        filePath: "src/ekf.py",
+        language: "Python",
+        score: 42,
+        confidence: 0.42,
+        reasons: ["knowledge matched: Extended Kalman Filter"],
+        symbolNames: ["EKF"],
+        knowledgeNames: ["Extended Kalman Filter"],
+        importSpecifiers: [],
+        matchedSymbols: ["EKF"],
+        matchedKnowledge: ["Extended Kalman Filter"],
+        matchedImports: [],
+        dependencyHints: [],
+        matchedReferences: [],
+        matchedLinks: []
+      }
+    ]);
+
+    expect(markdown).toContain("# Search Results");
+    expect(markdown).toContain("src/ekf.py");
   });
 });

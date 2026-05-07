@@ -14,7 +14,8 @@ const DEFAULT_IGNORES = [
   "coverage",
   "__pycache__",
   ".venv",
-  ".repolain"
+  ".repolain",
+  ".repo-lens"
 ] as const;
 
 const scanOptionsSchema = z

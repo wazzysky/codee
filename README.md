@@ -36,6 +36,20 @@ npm whoami
 - `repolain knowledge <path>` Markdown 或 JSON 知识点匹配输出
 - `repolain explain <file>` 规则解释或 AI 辅助解释
 - `repolain index <path>` SQLite 索引构建与摘要输出
+- `repolain symbols <path>` 符号提取输出
+- `repolain graph <path>` 文件级依赖图输出，支持 Mermaid
+- `repolain search <path> <query>` 基于路径、文件角色、知识点、symbols、symbol references、symbol links、imports 和 dependency graph 的相关文件搜索
+
+当前结构分析优先尝试 Tree-sitter parser，在不可用或失败时自动回退到 regex parser。当前支持的结构分析语言包括：
+
+- Python
+- TypeScript / JavaScript
+- C / C++
+
+当前 `symbols` JSON 除了符号定义，也会输出：
+
+- `references`：这个文件里调用/使用了哪些符号
+- `links`：这些引用进一步解析后，指向了哪个内部定义或外部依赖
 
 ## 使用方式
 
@@ -54,6 +68,9 @@ node packages/cli/dist/bin.js knowledge tests/fixtures/knowledge-demo --json
 node packages/cli/dist/bin.js explain tests/fixtures/knowledge-demo/src/ros_node.py
 node packages/cli/dist/bin.js explain tests/fixtures/knowledge-demo/src/ros_node.py --ai
 node packages/cli/dist/bin.js index tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js symbols tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js graph tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js search tests/fixtures/knowledge-demo EKF
 ```
 
 ## 命令
@@ -68,6 +85,13 @@ repolain knowledge <path> --json
 repolain explain <file>
 repolain explain <file> --ai
 repolain index <path>
+repolain symbols <path>
+repolain symbols <path> --json
+repolain graph <path>
+repolain graph <path> --json
+repolain graph <path> --mermaid
+repolain search <path> <query>
+repolain search <path> <query> --json
 ```
 
 ## LLM 环境变量
@@ -140,6 +164,20 @@ Current release provides:
 - `repolain knowledge <path>` Markdown or JSON knowledge matching output
 - `repolain explain <file>` rule-based or AI-assisted file explanation
 - `repolain index <path>` SQLite index builder and summary output
+- `repolain symbols <path>` symbol extraction output
+- `repolain graph <path>` file-level dependency graph output with Mermaid support
+- `repolain search <path> <query>` repository search using paths, file roles, knowledge matches, symbols, symbol references, symbol links, imports, and dependency graph hints
+
+Structure analysis now prefers Tree-sitter parsers and automatically falls back to regex parsers when Tree-sitter is unavailable or fails. Current structure-aware languages:
+
+- Python
+- TypeScript / JavaScript
+- C / C++
+
+The `symbols` JSON output now includes:
+
+- `references`, representing which symbols are called or used inside each file
+- `links`, representing where those references resolve, such as internal symbol definitions or external dependencies
 
 ## Usage
 
@@ -158,6 +196,9 @@ node packages/cli/dist/bin.js knowledge tests/fixtures/knowledge-demo --json
 node packages/cli/dist/bin.js explain tests/fixtures/knowledge-demo/src/ros_node.py
 node packages/cli/dist/bin.js explain tests/fixtures/knowledge-demo/src/ros_node.py --ai
 node packages/cli/dist/bin.js index tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js symbols tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js graph tests/fixtures/knowledge-demo
+node packages/cli/dist/bin.js search tests/fixtures/knowledge-demo EKF
 ```
 
 ## Commands
@@ -172,6 +213,13 @@ repolain knowledge <path> --json
 repolain explain <file>
 repolain explain <file> --ai
 repolain index <path>
+repolain symbols <path>
+repolain symbols <path> --json
+repolain graph <path>
+repolain graph <path> --json
+repolain graph <path> --mermaid
+repolain search <path> <query>
+repolain search <path> <query> --json
 ```
 
 ## LLM Environment

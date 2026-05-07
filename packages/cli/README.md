@@ -20,6 +20,10 @@ repolain knowledge <path>
 repolain explain <file>
 repolain explain <file> --ai
 repolain index <path>
+repolain symbols <path>
+repolain graph <path>
+repolain graph <path> --mermaid
+repolain search <path> <query>
 ```
 
 ## LLM 环境变量
@@ -52,6 +56,10 @@ repolain knowledge <path>
 repolain explain <file>
 repolain explain <file> --ai
 repolain index <path>
+repolain symbols <path>
+repolain graph <path>
+repolain graph <path> --mermaid
+repolain search <path> <query>
 ```
 
 ## LLM Environment

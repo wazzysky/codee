@@ -158,10 +158,22 @@ export interface IndexedFileRecord {
 
 export interface FileSearchResult {
   path: string;
+  filePath: string;
   language: string;
   role?: string;
   explanation?: string;
   score: number;
+  confidence: number;
+  reasons: string[];
+  symbolNames: string[];
+  knowledgeNames: string[];
+  importSpecifiers: string[];
+  matchedSymbols: string[];
+  matchedKnowledge: string[];
+  matchedImports: string[];
+  dependencyHints: string[];
+  matchedReferences: string[];
+  matchedLinks: string[];
 }
 
 export interface IndexSummary {
@@ -171,6 +183,139 @@ export interface IndexSummary {
   changedFiles: number;
   removedFiles: number;
   knowledgeMatchCount: number;
+  symbolCount: number;
+  referenceCount: number;
+  symbolLinkCount: number;
+  dependencyCount: number;
   diagnosticCount: number;
   projectTypes: string[];
+}
+
+export type SymbolKind = "function" | "class" | "method" | "component";
+export type SymbolReferenceKind = "call" | "new" | "component" | "type";
+export type ImportBindingKind = "default" | "named" | "namespace" | "module";
+export type DependencyKind = "import" | "include";
+export type DependencyResolution = "internal" | "external" | "unresolved";
+export type SymbolLinkResolution = "local" | "internal" | "external" | "global" | "unresolved";
+
+export interface SymbolDefinition {
+  name: string;
+  kind: SymbolKind;
+  startLine: number;
+  endLine: number;
+  containerName?: string;
+  signature?: string;
+}
+
+export interface ImportReference {
+  specifier: string;
+  kind: DependencyKind;
+  line: number;
+  isInternal: boolean;
+  targetPath?: string;
+  resolution: DependencyResolution;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface ImportBinding {
+  localName: string;
+  importedName?: string;
+  sourceSpecifier: string;
+  kind: ImportBindingKind;
+  line: number;
+}
+
+export interface EntryHint {
+  kind: string;
+  line: number;
+  symbolName?: string;
+  evidence: string;
+}
+
+export interface SymbolReference {
+  name: string;
+  kind: SymbolReferenceKind;
+  line: number;
+  qualifier?: string;
+  containerName?: string;
+  evidence: string;
+}
+
+export interface SymbolLink {
+  sourceFilePath: string;
+  sourceReferenceName: string;
+  sourceReferenceKind: SymbolReferenceKind;
+  sourceLine: number;
+  sourceQualifier?: string;
+  targetFilePath?: string;
+  targetSymbolName?: string;
+  targetSymbolKind?: SymbolKind;
+  targetSpecifier?: string;
+  resolution: SymbolLinkResolution;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface SymbolLinkGraph {
+  root: string;
+  links: SymbolLink[];
+  diagnostics: Diagnostic[];
+}
+
+export interface FileAnalysis {
+  filePath: string;
+  language: string;
+  parser: string;
+  symbols: SymbolDefinition[];
+  references: SymbolReference[];
+  importBindings: ImportBinding[];
+  imports: ImportReference[];
+  entryHints: EntryHint[];
+  diagnostics: Diagnostic[];
+}
+
+export interface StructureParseInput {
+  filePath: string;
+  content: string;
+  language: string;
+}
+
+export interface StructureParser {
+  language: string;
+  parse(input: StructureParseInput): Promise<FileAnalysis> | FileAnalysis;
+}
+
+export interface SymbolExtractionResult {
+  root: string;
+  files: FileAnalysis[];
+  links: SymbolLink[];
+  diagnostics: Diagnostic[];
+}
+
+export interface DependencyGraphNode {
+  path: string;
+  language: string;
+}
+
+export interface DependencyGraphEdge {
+  sourcePath: string;
+  targetPath?: string;
+  specifier: string;
+  kind: DependencyKind;
+  line: number;
+  resolution: DependencyResolution;
+  from: string;
+  to?: string;
+  type: DependencyKind;
+  resolved: boolean;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface DependencyGraph {
+  root: string;
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+  diagnostics: Diagnostic[];
 }

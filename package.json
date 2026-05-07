@@ -20,8 +20,8 @@
   "scripts": {
     "build": "corepack pnpm -r build",
     "test": "corepack pnpm exec vitest run",
-    "lint": "corepack pnpm -r exec tsc --noEmit",
-    "release:check": "corepack pnpm lint && corepack pnpm build && corepack pnpm test",
+    "lint": "corepack pnpm build && corepack pnpm -r exec tsc --noEmit",
+    "release:check": "corepack pnpm lint && corepack pnpm test",
     "pack:cli": "corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts",
     "pack:packages": "corepack pnpm --dir packages/knowledge-base pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/core pack --pack-destination ../../.artifacts && corepack pnpm --dir packages/cli pack --pack-destination ../../.artifacts",
     "publish:dry-run": "corepack pnpm --filter @repolain/knowledge-base publish --access public --dry-run --no-git-checks && corepack pnpm --filter @repolain/core publish --access public --dry-run --no-git-checks && corepack pnpm --filter repolain publish --access public --dry-run --no-git-checks",

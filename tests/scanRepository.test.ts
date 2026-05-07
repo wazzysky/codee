@@ -51,6 +51,8 @@ describe("scanRepository", () => {
     await writeFile(root, "node_modules/pkg/index.js", "console.log('skip');\n");
     await writeFile(root, ".git/config", "[core]\n");
     await writeFile(root, "dist/output.js", "console.log('skip');\n");
+    await writeFile(root, ".repo-lens/index.sqlite", "skip\n");
+    await writeFile(root, ".repolain/index.sqlite", "skip\n");
 
     const result = await scanRepository(root);
 

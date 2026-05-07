@@ -1,19 +1,26 @@
 import {
+  buildDependencyGraph,
   detectProject,
   explainFile,
+  extractRepositorySymbols,
   generateFileMap,
   indexRepository,
   matchKnowledge,
+  searchRepository,
   scanRepository
 } from "@repolain/core";
 import { Command } from "commander";
 import type {
+  DependencyGraph,
   DirectorySummary,
   FileExplanation,
+  FileAnalysis,
+  FileSearchResult,
   FileMap,
   IndexSummary,
   KnowledgeResult
 } from "@repolain/core";
+import path from "node:path";
 
 export interface CliIo {
   stderr: (message: string) => void;
@@ -164,6 +171,10 @@ export function renderIndexSummaryMarkdown(result: IndexSummary): string {
     `Changed Files: ${result.changedFiles}`,
     `Removed Files: ${result.removedFiles}`,
     `Knowledge Matches: ${result.knowledgeMatchCount}`,
+    `Symbols: ${result.symbolCount}`,
+    `References: ${result.referenceCount}`,
+    `Symbol Links: ${result.symbolLinkCount}`,
+    `Dependencies: ${result.dependencyCount}`,
     `Diagnostics: ${result.diagnosticCount}`,
     ""
   ];
@@ -178,6 +189,106 @@ export function renderIndexSummaryMarkdown(result: IndexSummary): string {
   }
   lines.push("");
 
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function renderSymbolsMarkdown(root: string, analyses: FileAnalysis[]): string {
+  const lines: string[] = [
+    "# Symbols",
+    "",
+    `Root: \`${root}\``,
+    "",
+    `Files: ${analyses.length}`,
+    `Symbols: ${analyses.reduce((total, analysis) => total + analysis.symbols.length, 0)}`,
+    `References: ${analyses.reduce((total, analysis) => total + analysis.references.length, 0)}`,
+    ""
+  ];
+
+  for (const analysis of analyses) {
+    lines.push(`## ${analysis.filePath}`, "");
+    lines.push(`Language: ${analysis.language}`, "");
+    lines.push("| Kind | Name | Container | Lines | Signature |");
+    lines.push("|---|---|---|---|---|");
+    for (const symbol of analysis.symbols) {
+      lines.push(
+        `| ${symbol.kind} | ${escapeMarkdownCell(symbol.name)} | ${escapeMarkdownCell(symbol.containerName ?? "")} | ${symbol.startLine}-${symbol.endLine} | ${escapeMarkdownCell(symbol.signature ?? "")} |`
+      );
+    }
+    if (analysis.symbols.length === 0) {
+      lines.push("| - | - | - | - | - |");
+    }
+    lines.push("");
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function renderDependencyGraphMarkdown(graph: DependencyGraph): string {
+  const lines: string[] = [
+    "# Dependency Graph",
+    "",
+    `Root: \`${graph.root}\``,
+    "",
+    `Nodes: ${graph.nodes.length}`,
+    `Edges: ${graph.edges.length}`,
+    "",
+    "| Source | Target | Specifier | Kind | Resolution |",
+    "|---|---|---|---|---|"
+  ];
+
+  for (const edge of graph.edges) {
+    lines.push(
+      `| ${escapeMarkdownCell(edge.sourcePath)} | ${escapeMarkdownCell(edge.targetPath ?? "(external/unresolved)")} | ${escapeMarkdownCell(edge.specifier)} | ${edge.kind} | ${edge.resolution} |`
+    );
+  }
+
+  if (graph.edges.length === 0) {
+    lines.push("| - | - | - | - | - |");
+  }
+
+  lines.push("");
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function renderDependencyGraphMermaid(graph: DependencyGraph): string {
+  const lines = ["graph TD"];
+  for (const edge of graph.edges) {
+    const sourceId = edge.sourcePath.replace(/[^a-zA-Z0-9_]/gu, "_");
+    const targetLabel = edge.targetPath ?? `${edge.resolution}:${edge.specifier}`;
+    const targetId = targetLabel.replace(/[^a-zA-Z0-9_]/gu, "_");
+    lines.push(`  ${sourceId}["${edge.sourcePath}"] -->|${edge.specifier}| ${targetId}["${targetLabel}"]`);
+  }
+
+  if (graph.edges.length === 0) {
+    lines.push("  empty[\"No dependencies detected\"]");
+  }
+
+  return `\`\`\`mermaid\n${lines.join("\n")}\n\`\`\`\n`;
+}
+
+export function renderSearchMarkdown(root: string, results: FileSearchResult[]): string {
+  const lines: string[] = [
+    "# Search Results",
+    "",
+    `Root: \`${root}\``,
+    "",
+    `Matches: ${results.length}`,
+    "",
+    "| File | Language | Confidence | Reasons |",
+    "|---|---|---|---|"
+  ];
+
+  for (const result of results) {
+    lines.push(
+      `| ${escapeMarkdownCell(result.path)} | ${escapeMarkdownCell(result.language)} | ${formatConfidence(result.confidence)} | ${escapeMarkdownCell(result.reasons.join("; "))} |`
+    );
+  }
+
+  if (results.length === 0) {
+    lines.push("| - | - | - | - |");
+  }
+
+  lines.push("");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
@@ -286,6 +397,64 @@ export function createProgram(io: CliIo = createDefaultIo()): Command {
     .action(async (targetPath: string) => {
       const result = await indexRepository(targetPath);
       io.stdout(renderIndexSummaryMarkdown(result));
+    });
+
+  program
+    .command("symbols")
+    .argument("<path>", "repository root path")
+    .option("--json", "emit the raw symbol extraction structure as JSON")
+    .description("Extract repository symbols, imports/includes, and entry hints")
+    .action(async (targetPath: string, options: { json?: boolean }) => {
+      const scanResult = await scanRepository(targetPath);
+      const result = await extractRepositorySymbols(scanResult);
+
+      if (options.json) {
+        io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+
+      io.stdout(renderSymbolsMarkdown(result.root, result.files));
+    });
+
+  program
+    .command("graph")
+    .argument("<path>", "repository root path")
+    .option("--json", "emit the raw dependency graph structure as JSON")
+    .option("--mermaid", "emit a Mermaid dependency graph")
+    .description("Build a file-level dependency graph from imports and includes")
+    .action(async (targetPath: string, options: { json?: boolean; mermaid?: boolean }) => {
+      const scanResult = await scanRepository(targetPath);
+      const symbolResult = await extractRepositorySymbols(scanResult);
+      const graph = buildDependencyGraph(scanResult.root, symbolResult.files);
+
+      if (options.json) {
+        io.stdout(`${JSON.stringify(graph, null, 2)}\n`);
+        return;
+      }
+
+      if (options.mermaid) {
+        io.stdout(renderDependencyGraphMermaid(graph));
+        return;
+      }
+
+      io.stdout(renderDependencyGraphMarkdown(graph));
+    });
+
+  program
+    .command("search")
+    .argument("<path>", "repository root path")
+    .argument("<query>", "search query")
+    .option("--json", "emit the raw search result structure as JSON")
+    .description("Search related files using indexed or temporary repository analysis")
+    .action(async (targetPath: string, query: string, options: { json?: boolean }) => {
+      const results = await searchRepository(targetPath, query);
+
+      if (options.json) {
+        io.stdout(`${JSON.stringify(results, null, 2)}\n`);
+        return;
+      }
+
+      io.stdout(renderSearchMarkdown(path.resolve(targetPath), results));
     });
 
   return program;

@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
     "paths": {
+      "@repolain/core": ["packages/core/src/index.ts"],
       "@repolain/knowledge-base": ["packages/knowledge-base/src/index.ts"]
     },
     "strict": true,

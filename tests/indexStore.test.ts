@@ -5,8 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   getFile,
   indexRepository,
+  listDependencies,
   listFiles,
   listKnowledgeMatches,
+  listSymbolLinks,
+  listSymbolReferences,
+  listSymbols,
   searchFiles
 } from "../packages/core/src/index";
 
@@ -46,7 +50,7 @@ describe("SQLiteIndexStore", () => {
     expect(files.some((file) => file.path === "src/ros_node.py")).toBe(true);
   });
 
-  it("supports getFile, searchFiles, and listKnowledgeMatches queries", async () => {
+  it("supports getFile, searchFiles, listKnowledgeMatches, listSymbols, and listDependencies queries", async () => {
     const repoRoot = await copyFixture("knowledge-demo");
     await indexRepository(repoRoot);
 
@@ -70,6 +74,102 @@ describe("SQLiteIndexStore", () => {
         expect.objectContaining({
           filePath: "src/ros_node.py",
           knowledgeId: "ros-node"
+        })
+      ])
+    );
+
+    await expect(listSymbols(repoRoot, "src/App.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "src/App.tsx",
+          name: "App"
+        })
+      ])
+    );
+
+    await expect(listDependencies(repoRoot, "src/main.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourcePath: "src/main.tsx",
+          specifier: "react-dom/client",
+          confidence: expect.any(Number),
+          evidence: expect.any(Array)
+        })
+      ])
+    );
+  });
+
+  it("persists structured symbols, symbol references, and internal dependencies from structure analysis", async () => {
+    const repoRoot = await copyFixture("structure-demo");
+    const summary = await indexRepository(repoRoot);
+
+    expect(summary.referenceCount).toBeGreaterThan(0);
+    expect(summary.symbolLinkCount).toBeGreaterThan(0);
+    await expect(listSymbols(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "Bootstrapper"
+        }),
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "App"
+        })
+      ])
+    );
+
+    await expect(listSymbolReferences(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "Panel",
+          kind: "component"
+        }),
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "createRoot",
+          kind: "call"
+        })
+      ])
+    );
+
+    await expect(listDependencies(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourcePath: "ts/app.tsx",
+          specifier: "./lib",
+          targetPath: "ts/lib/index.ts",
+          resolution: "internal",
+          resolved: true
+        }),
+        expect.objectContaining({
+          sourcePath: "ts/app.tsx",
+          specifier: "react-dom/client",
+          resolution: "external",
+          resolved: false
+        })
+      ])
+    );
+
+    await expect(listSymbolLinks(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFilePath: "ts/app.tsx",
+          sourceReferenceName: "createRoot",
+          targetSpecifier: "react-dom/client",
+          resolution: "external"
+        })
+      ])
+    );
+
+    await expect(listSymbolLinks(repoRoot, "cpp/main.cpp")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFilePath: "cpp/main.cpp",
+          sourceReferenceName: "compute_value",
+          targetFilePath: "cpp/utils/math.cpp",
+          targetSymbolName: "compute_value",
+          resolution: "internal"
         })
       ])
     );

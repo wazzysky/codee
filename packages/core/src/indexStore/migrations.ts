@@ -102,5 +102,110 @@ export const indexMigrations: IndexMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_file_knowledge_knowledge_id ON file_knowledge(knowledge_id);
       CREATE INDEX IF NOT EXISTS idx_diagnostics_path ON diagnostics(path);
     `
+  },
+  {
+    version: 2,
+    name: "add-symbols-and-dependencies",
+    sql: `
+      CREATE TABLE IF NOT EXISTS symbols (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        container_name TEXT,
+        signature TEXT,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_path, name, kind, start_line),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS dependencies (
+        source_path TEXT NOT NULL,
+        specifier TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        target_path TEXT,
+        line INTEGER NOT NULL,
+        resolution TEXT NOT NULL,
+        is_internal INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(source_path, specifier, kind, line),
+        FOREIGN KEY(source_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_symbols_file_path ON symbols(file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+      CREATE INDEX IF NOT EXISTS idx_dependencies_source_path ON dependencies(source_path);
+      CREATE INDEX IF NOT EXISTS idx_dependencies_target_path ON dependencies(target_path);
+    `
+  },
+  {
+    version: 3,
+    name: "add-dependency-confidence-and-evidence",
+    sql: `
+      ALTER TABLE dependencies ADD COLUMN confidence REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE dependencies ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]';
+    `
+  },
+  {
+    version: 4,
+    name: "add-symbol-references",
+    sql: `
+      CREATE TABLE IF NOT EXISTS symbol_references (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        container_name TEXT,
+        evidence TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_path, name, kind, line, container_name, evidence),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_symbol_references_file_path ON symbol_references(file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_references_name ON symbol_references(name);
+    `
+  },
+  {
+    version: 5,
+    name: "add-symbol-links",
+    sql: `
+      CREATE TABLE IF NOT EXISTS symbol_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_file_path TEXT NOT NULL,
+        source_reference_name TEXT NOT NULL,
+        source_reference_kind TEXT NOT NULL,
+        source_line INTEGER NOT NULL,
+        source_qualifier TEXT,
+        target_file_path TEXT,
+        target_symbol_name TEXT,
+        target_symbol_kind TEXT,
+        target_specifier TEXT,
+        resolution TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        evidence_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(
+          source_file_path,
+          source_reference_name,
+          source_reference_kind,
+          source_line,
+          source_qualifier,
+          target_file_path,
+          target_symbol_name,
+          target_specifier,
+          resolution
+        ),
+        FOREIGN KEY(source_file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_symbol_links_source_file_path ON symbol_links(source_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_links_target_file_path ON symbol_links(target_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_links_source_reference_name ON symbol_links(source_reference_name);
+      CREATE INDEX IF NOT EXISTS idx_symbol_links_target_symbol_name ON symbol_links(target_symbol_name);
+    `
   }
 ];
