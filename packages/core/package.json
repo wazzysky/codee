@@ -1,6 +1,6 @@
 {
   "name": "@repolain/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Core scanning, detection, mapping, knowledge matching, explanation, and indexing engine for Repolain.",
   "license": "MIT",
   "repository": {
