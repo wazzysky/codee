@@ -40,7 +40,7 @@ npm whoami
 - `repolain graph <path>` 文件级依赖图输出，支持 Mermaid
 - `repolain search <path> <query>` 基于路径、文件角色、知识点、symbols、symbol references、symbol links、imports 和 dependency graph 的相关文件搜索
 
-当前结构分析优先尝试 Tree-sitter parser，在不可用或失败时自动回退到 regex parser。当前支持的结构分析语言包括：
+当前结构分析优先尝试 Tree-sitter parser，在不可用或失败时自动回退到 regex parser。npm 全局安装 `repolain` 时默认不会额外安装这些原生 parser 依赖，因此开箱即用行为是稳定的 regex fallback；如果你需要更强的结构分析精度，可以在运行环境里额外安装 `tree-sitter`、`tree-sitter-python`、`tree-sitter-typescript`、`tree-sitter-javascript`、`tree-sitter-c`、`tree-sitter-cpp`。当前支持的结构分析语言包括：
 
 - Python
 - TypeScript / JavaScript
@@ -174,7 +174,7 @@ Current release provides:
 - `repolain graph <path>` file-level dependency graph output with Mermaid support
 - `repolain search <path> <query>` repository search using paths, file roles, knowledge matches, symbols, symbol references, symbol links, imports, and dependency graph hints
 
-Structure analysis now prefers Tree-sitter parsers and automatically falls back to regex parsers when Tree-sitter is unavailable or fails. Current structure-aware languages:
+Structure analysis now prefers Tree-sitter parsers and automatically falls back to regex parsers when Tree-sitter is unavailable or fails. The published npm CLI does not install those native parser packages by default, so the out-of-the-box behavior is stable regex fallback; if you want higher-accuracy native parsing, install `tree-sitter`, `tree-sitter-python`, `tree-sitter-typescript`, `tree-sitter-javascript`, `tree-sitter-c`, and `tree-sitter-cpp` in the runtime environment. Current structure-aware languages:
 
 - Python
 - TypeScript / JavaScript
