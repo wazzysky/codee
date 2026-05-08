@@ -6,6 +6,11 @@ class MotionPlanner:
         return state
 
 
+class BackupPlanner:
+    def step(self, state):
+        return state
+
+
 def helper(value):
     foo = Foo()
     return foo.run() + value + 1

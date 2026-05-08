@@ -103,6 +103,29 @@ function uniqSortedImportBindings(importBindings: FileAnalysis["importBindings"]
     });
 }
 
+function uniqSortedLocalTypeHints(localTypeHints: FileAnalysis["localTypeHints"]): FileAnalysis["localTypeHints"] {
+  return localTypeHints
+    .slice()
+    .sort((left, right) =>
+      left.line === right.line
+        ? `${left.name}:${left.typeName}`.localeCompare(`${right.name}:${right.typeName}`)
+        : left.line - right.line
+    )
+    .filter((hint, index, items) => {
+      if (index === 0) {
+        return true;
+      }
+
+      const previous = items[index - 1];
+      return !(
+        previous.line === hint.line &&
+        previous.name === hint.name &&
+        previous.typeName === hint.typeName &&
+        previous.evidence === hint.evidence
+      );
+    });
+}
+
 function uniqSortedReferences(references: FileAnalysis["references"]): FileAnalysis["references"] {
   return references
     .slice()
@@ -169,6 +192,7 @@ export async function analyzeFileStructure(
       symbols: uniqSortedSymbols(analysis.symbols),
       references: uniqSortedReferences(analysis.references),
       importBindings: uniqSortedImportBindings(analysis.importBindings),
+      localTypeHints: uniqSortedLocalTypeHints(analysis.localTypeHints),
       imports: uniqSortedImports(analysis.imports),
       entryHints: uniqSortedEntryHints(analysis.entryHints),
       diagnostics: uniqSortedDiagnostics(analysis.diagnostics)
@@ -182,6 +206,7 @@ export async function analyzeFileStructure(
       symbols: [],
       references: [],
       importBindings: [],
+      localTypeHints: [],
       imports: [],
       entryHints: [],
       diagnostics: [
@@ -225,6 +250,7 @@ export async function extractRepositorySymbols(
         symbols: [],
         references: [],
         importBindings: [],
+        localTypeHints: [],
         imports: [],
         entryHints: [],
         diagnostics: [

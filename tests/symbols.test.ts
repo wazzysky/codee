@@ -65,14 +65,16 @@ describe("analyzeFileStructure", () => {
     const analysis = await analyzeFileStructure(
       "ts/app.tsx",
       [
-        'import Engine, { ArrowTool, helper } from "./lib";',
+        'import Engine, { ArrowTool, ConsoleEngine, helper } from "./lib";',
         'import ReactDOM from "react-dom/client";',
         'import { Panel } from "./ui";',
         "",
         "export class Bootstrapper {",
         "  run(): void {",
         "    const engine = new Engine();",
+        "    const consoleEngine = new ConsoleEngine();",
         "    console.log(engine.start());",
+        "    console.log(consoleEngine.start());",
         "  }",
         "}",
         "",
@@ -114,7 +116,14 @@ describe("analyzeFileStructure", () => {
       expect.arrayContaining([
         expect.objectContaining({ localName: "Engine", sourceSpecifier: "./lib", kind: "default" }),
         expect.objectContaining({ localName: "ArrowTool", sourceSpecifier: "./lib", kind: "named" }),
+        expect.objectContaining({ localName: "ConsoleEngine", sourceSpecifier: "./lib", kind: "named" }),
         expect.objectContaining({ localName: "ReactDOM", sourceSpecifier: "react-dom/client", kind: "default" })
+      ])
+    );
+    expect(analysis.localTypeHints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "engine", typeName: "Engine" }),
+        expect.objectContaining({ name: "consoleEngine", typeName: "ConsoleEngine" })
       ])
     );
   });
@@ -233,6 +242,7 @@ describe("extractRepositorySymbols", () => {
           symbols: [],
           references: [],
           importBindings: [],
+          localTypeHints: [],
           imports: [],
           entryHints: [],
           diagnostics: []
@@ -272,10 +282,26 @@ describe("extractRepositorySymbols", () => {
           resolution: "external"
         }),
         expect.objectContaining({
+          sourceFilePath: "ts/app.tsx",
+          sourceReferenceName: "start",
+          sourceQualifier: "consoleEngine",
+          targetFilePath: "ts/lib/index.ts",
+          targetSymbolName: "start",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
           sourceFilePath: "cpp/main.cpp",
           sourceReferenceName: "compute_value",
           targetFilePath: "cpp/utils/math.cpp",
           targetSymbolName: "compute_value",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "python_pkg/main.py",
+          sourceReferenceName: "step",
+          sourceQualifier: "planner",
+          targetFilePath: "python_pkg/utils.py",
+          targetSymbolName: "step",
           resolution: "internal"
         })
       ])

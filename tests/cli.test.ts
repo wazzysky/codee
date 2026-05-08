@@ -341,6 +341,7 @@ describe("CLI", () => {
         symbols: [{ name: "main", kind: "function", startLine: 1, endLine: 3 }],
         references: [{ name: "helper", kind: "call", line: 2, evidence: "regex: helper()" }],
         importBindings: [],
+        localTypeHints: [],
         imports: [],
         entryHints: [],
         diagnostics: []

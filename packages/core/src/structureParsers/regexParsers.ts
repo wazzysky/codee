@@ -7,7 +7,8 @@ import type {
   StructureParseInput,
   StructureParser,
   SymbolReference,
-  SymbolDefinition
+  SymbolDefinition,
+  VariableTypeHint
 } from "../types.js";
 
 interface PythonClassCandidate extends SymbolDefinition {
@@ -164,6 +165,29 @@ function sortImportBindings(importBindings: ImportBinding[]): ImportBinding[] {
     });
 }
 
+function sortLocalTypeHints(localTypeHints: VariableTypeHint[]): VariableTypeHint[] {
+  return localTypeHints
+    .slice()
+    .sort((left, right) =>
+      left.line === right.line
+        ? `${left.name}:${left.typeName}`.localeCompare(`${right.name}:${right.typeName}`)
+        : left.line - right.line
+    )
+    .filter((hint, index, items) => {
+      if (index === 0) {
+        return true;
+      }
+
+      const previous = items[index - 1];
+      return !(
+        previous.line === hint.line &&
+        previous.name === hint.name &&
+        previous.typeName === hint.typeName &&
+        previous.evidence === hint.evidence
+      );
+    });
+}
+
 function addReference(
   references: SymbolReference[],
   name: string,
@@ -183,12 +207,28 @@ function addReference(
   });
 }
 
+function addLocalTypeHint(
+  localTypeHints: VariableTypeHint[],
+  name: string,
+  typeName: string,
+  line: number,
+  evidence: string
+): void {
+  localTypeHints.push({
+    name,
+    typeName,
+    line,
+    evidence
+  });
+}
+
 function parsePython(input: StructureParseInput): FileAnalysis {
   const filePath = normalizePath(input.filePath);
   const lines = splitLines(input.content);
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -313,6 +353,18 @@ function parsePython(input: StructureParseInput): FileAnalysis {
     const activeContainer = symbols
       .filter((symbol) => symbol.startLine <= index + 1 && symbol.endLine >= index + 1)
       .sort((left, right) => right.startLine - left.startLine)[0];
+
+    const localTypeHintMatch = /^([a-z_]\w*)\s*=\s*([A-Z][A-Za-z0-9_]*)\s*\(/u.exec(trimmed);
+    if (localTypeHintMatch) {
+      addLocalTypeHint(
+        localTypeHints,
+        localTypeHintMatch[1],
+        localTypeHintMatch[2],
+        index + 1,
+        `regex: ${trimmed}`
+      );
+    }
+
     for (const match of trimmed.matchAll(/\b([A-Za-z_]\w*)\s*\(/gu)) {
       const calleeName = match[1];
       if (calleeName === "def" || calleeName === "class") {
@@ -334,6 +386,7 @@ function parsePython(input: StructureParseInput): FileAnalysis {
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line
     ),
@@ -350,6 +403,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -481,6 +535,20 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
     const activeContainer = symbols
       .filter((symbol) => symbol.startLine <= index + 1 && symbol.endLine >= index + 1)
       .sort((left, right) => right.startLine - left.startLine)[0];
+
+    const localTypeHintMatch =
+      /^\s*(?:const|let|var)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z][A-Za-z0-9_]*)\s*\(/u.exec(trimmed) ??
+      /^\s*(?:const|let|var)\s+([a-zA-Z_]\w*)\s*:\s*([A-Z][A-Za-z0-9_.<>]*)\s*=/u.exec(trimmed);
+    if (localTypeHintMatch) {
+      addLocalTypeHint(
+        localTypeHints,
+        localTypeHintMatch[1],
+        localTypeHintMatch[2].replace(/<.*$/u, ""),
+        index + 1,
+        `regex: ${trimmed}`
+      );
+    }
+
     for (const match of trimmed.matchAll(/\bnew\s+([A-Za-z_]\w*)\s*\(/gu)) {
       addReference(references, match[1], "new", index + 1, `regex: ${trimmed}`, activeContainer?.name);
     }
@@ -560,6 +628,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line
     ),
@@ -576,6 +645,7 @@ function parseCppLike(input: StructureParseInput, language: "C" | "C++"): FileAn
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -647,6 +717,20 @@ function parseCppLike(input: StructureParseInput, language: "C" | "C++"): FileAn
     const activeContainer = symbols
       .filter((symbol) => symbol.startLine <= index + 1 && symbol.endLine >= index + 1)
       .sort((left, right) => right.startLine - left.startLine)[0];
+
+    const localTypeHintMatch =
+      /^\s*([A-Z][A-Za-z0-9_:<>]*)\s+([a-z_]\w*)\s*(?:[;=({])/u.exec(trimmed) ??
+      /^\s*([A-Z][A-Za-z0-9_:<>]*)\s+([a-zA-Z_]\w*)\s*=\s*[A-Z][A-Za-z0-9_:<>]*\s*\(/u.exec(trimmed);
+    if (localTypeHintMatch) {
+      addLocalTypeHint(
+        localTypeHints,
+        localTypeHintMatch[2],
+        localTypeHintMatch[1].replace(/<.*$/u, "").split("::").pop() ?? localTypeHintMatch[1],
+        index + 1,
+        `regex: ${trimmed}`
+      );
+    }
+
     for (const match of trimmed.matchAll(/\bnew\s+([A-Za-z_]\w*)\s*\(/gu)) {
       addReference(references, match[1], "new", index + 1, `regex: ${trimmed}`, activeContainer?.name);
     }
@@ -707,6 +791,7 @@ function parseCppLike(input: StructureParseInput, language: "C" | "C++"): FileAn
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line
     ),

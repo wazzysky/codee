@@ -48,6 +48,10 @@ function pushReason(reasons: string[], value: string): void {
   }
 }
 
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
 function scoreSearchResult(filePath: string, context: SearchContext, query: string): FileSearchResult | undefined {
   const normalizedQuery = query.trim().toLowerCase();
   const tokens = tokenize(normalizedQuery);
@@ -156,15 +160,15 @@ function scoreSearchResult(filePath: string, context: SearchContext, query: stri
     score,
     confidence: Number(Math.min(0.99, Math.max(0.2, score / 100)).toFixed(2)),
     reasons,
-    symbolNames: matchedSymbols.sort((left, right) => left.localeCompare(right)),
-    knowledgeNames: matchedKnowledge.sort((left, right) => left.localeCompare(right)),
-    importSpecifiers: matchedImports.sort((left, right) => left.localeCompare(right)),
-    matchedSymbols: matchedSymbols.sort((left, right) => left.localeCompare(right)),
-    matchedKnowledge: matchedKnowledge.sort((left, right) => left.localeCompare(right)),
-    matchedImports: matchedImports.sort((left, right) => left.localeCompare(right)),
-    dependencyHints: matchedDependencyHints.sort((left, right) => left.localeCompare(right)),
-    matchedReferences: matchedReferences.sort((left, right) => left.localeCompare(right)),
-    matchedLinks: matchedLinks.sort((left, right) => left.localeCompare(right))
+    symbolNames: uniqueSorted(matchedSymbols),
+    knowledgeNames: uniqueSorted(matchedKnowledge),
+    importSpecifiers: uniqueSorted(matchedImports),
+    matchedSymbols: uniqueSorted(matchedSymbols),
+    matchedKnowledge: uniqueSorted(matchedKnowledge),
+    matchedImports: uniqueSorted(matchedImports),
+    dependencyHints: uniqueSorted(matchedDependencyHints),
+    matchedReferences: uniqueSorted(matchedReferences),
+    matchedLinks: uniqueSorted(matchedLinks)
   };
 }
 

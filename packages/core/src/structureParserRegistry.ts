@@ -51,6 +51,7 @@ export class StructureParserRegistry {
         symbols: [],
         references: [],
         importBindings: [],
+        localTypeHints: [],
         imports: [],
         entryHints: [],
         diagnostics: []
@@ -66,6 +67,7 @@ export class StructureParserRegistry {
           symbols: [],
           references: [],
           importBindings: [],
+          localTypeHints: [],
           imports: [],
           entryHints: [],
           diagnostics

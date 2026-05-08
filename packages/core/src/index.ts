@@ -69,5 +69,6 @@ export type {
   SymbolReferenceKind,
   SymbolDefinition,
   SymbolExtractionResult,
-  SymbolKind
+  SymbolKind,
+  VariableTypeHint
 } from "./types.js";

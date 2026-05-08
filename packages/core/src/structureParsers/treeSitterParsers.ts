@@ -7,7 +7,8 @@ import type {
   StructureParseInput,
   StructureParser,
   SymbolReference,
-  SymbolDefinition
+  SymbolDefinition,
+  VariableTypeHint
 } from "../types.js";
 
 type TreeSitterModule = {
@@ -272,6 +273,38 @@ function parseImportBindingsFromText(text: string, specifier: string, line: numb
   return bindings;
 }
 
+function parseLocalTypeHintsFromText(text: string, line: number, language: string): VariableTypeHint[] {
+  if (language === "Python") {
+    const match = /^([a-z_]\w*)\s*=\s*([A-Z][A-Za-z0-9_]*)\s*\(/u.exec(text.trim());
+    return match ? [{ name: match[1], typeName: match[2], line, evidence: `tree-sitter:${text.trim()}` }] : [];
+  }
+
+  if (language === "TypeScript" || language === "JavaScript") {
+    const match =
+      /(?:const|let|var)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z][A-Za-z0-9_]*)\s*\(/u.exec(text) ??
+      /(?:const|let|var)\s+([a-zA-Z_]\w*)\s*:\s*([A-Z][A-Za-z0-9_.<>]*)\s*=/u.exec(text);
+    return match
+      ? [{ name: match[1], typeName: match[2].replace(/<.*$/u, ""), line, evidence: `tree-sitter:${text.trim()}` }]
+      : [];
+  }
+
+  if (language === "C" || language === "C++") {
+    const match = /^\s*([A-Z][A-Za-z0-9_:<>]*)\s+([a-z_]\w*)\s*(?:[;=({])/u.exec(text.trim());
+    return match
+      ? [
+          {
+            name: match[2],
+            typeName: match[1].replace(/<.*$/u, "").split("::").pop() ?? match[1],
+            line,
+            evidence: `tree-sitter:${text.trim()}`
+          }
+        ]
+      : [];
+  }
+
+  return [];
+}
+
 function collectDiagnostics(filePath: string, error: unknown): Diagnostic[] {
   const message = error instanceof Error ? error.message : String(error);
   return [
@@ -302,6 +335,7 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
 
@@ -368,6 +402,8 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
             extractCallQualifier(node)
           );
         }
+      } else if (node.type === "assignment") {
+        localTypeHints.push(...parseLocalTypeHintsFromText(node.text, node.startPosition.row + 1, language));
       }
     } else if (language === "TypeScript" || language === "JavaScript") {
       if (node.type === "import_statement") {
@@ -413,6 +449,19 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
         if (match) {
           addSymbol(symbols, match[1], "component", node, containerName, text);
         }
+        localTypeHints.push(...parseLocalTypeHintsFromText(text, node.startPosition.row + 1, language));
+      } else if (node.type === "lexical_declaration" || node.type === "variable_declaration") {
+        const text = node.text.split(/\r?\n/u)[0]?.trim() ?? "";
+        const arrowFunctionMatch =
+          /(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*[^=]+)?=>/u.exec(text) ??
+          /(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*function\b/u.exec(text);
+        if (arrowFunctionMatch) {
+          const symbolName = arrowFunctionMatch[1];
+          const symbolKind =
+            /\.(tsx|jsx)$/iu.test(filePath) && /^[A-Z]/u.test(symbolName) ? "component" : "function";
+          addSymbol(symbols, symbolName, symbolKind, node, containerName, text);
+        }
+        localTypeHints.push(...parseLocalTypeHintsFromText(text, node.startPosition.row + 1, language));
       } else if (node.type === "call_expression") {
         const calleeName = extractCallTargetName(node);
         if (calleeName) {
@@ -503,6 +552,8 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
         if (typeName) {
           addReference(references, typeName, "new", node, `tree-sitter:${node.type}`, containerName);
         }
+      } else if (node.type === "declaration") {
+        localTypeHints.push(...parseLocalTypeHintsFromText(node.text, node.startPosition.row + 1, language));
       }
     }
 
@@ -543,6 +594,13 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
       .sort((left, right) =>
         left.line === right.line
           ? `${left.sourceSpecifier}:${left.localName}`.localeCompare(`${right.sourceSpecifier}:${right.localName}`)
+          : left.line - right.line
+      ),
+    localTypeHints: localTypeHints
+      .slice()
+      .sort((left, right) =>
+        left.line === right.line
+          ? `${left.name}:${left.typeName}`.localeCompare(`${right.name}:${right.typeName}`)
           : left.line - right.line
       ),
     imports: imports
@@ -597,6 +655,7 @@ async function createTreeSitterParser(language: string): Promise<StructureParser
             symbols: [],
             references: [],
             importBindings: [],
+            localTypeHints: [],
             imports: [],
             entryHints: [],
             diagnostics: collectDiagnostics(input.filePath, error)

@@ -303,6 +303,10 @@ function tokenizeQuery(query: string): string[] {
     .filter((part) => part.length > 0);
 }
 
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
 export class SQLiteIndexStore {
   public readonly root: string;
   public readonly dbDir: string;
@@ -484,19 +488,19 @@ export class SQLiteIndexStore {
       const filePath = String(row.path);
       const explanation =
         row.explanation === null || row.explanation === undefined ? undefined : String(row.explanation);
-      const symbolNames = (symbolsByPath.get(filePath) ?? [])
+      const symbolNames = uniqueSorted((symbolsByPath.get(filePath) ?? [])
         .map((symbol) => symbol.name)
         .filter((name) => tokens.some((token) => name.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const symbolKinds = (symbolsByPath.get(filePath) ?? [])
+      );
+      const symbolKinds = uniqueSorted((symbolsByPath.get(filePath) ?? [])
         .map((symbol) => symbol.kind)
         .filter((kind) => tokens.some((token) => kind.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const matchedReferences = (referencesByPath.get(filePath) ?? [])
+      );
+      const matchedReferences = uniqueSorted((referencesByPath.get(filePath) ?? [])
         .map((reference) => reference.name)
         .filter((name) => tokens.some((token) => name.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const matchedLinks = (linksByPath.get(filePath) ?? [])
+      );
+      const matchedLinks = uniqueSorted((linksByPath.get(filePath) ?? [])
         .flatMap((link) => [
           link.sourceReferenceName,
           link.targetSymbolName ?? "",
@@ -507,20 +511,20 @@ export class SQLiteIndexStore {
         ])
         .filter((value) => value.length > 0)
         .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const importSpecifiers = (dependenciesByPath.get(filePath) ?? [])
+      );
+      const importSpecifiers = uniqueSorted((dependenciesByPath.get(filePath) ?? [])
         .map((dependency) => dependency.specifier)
         .filter((specifier) => tokens.some((token) => specifier.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const dependencyHints = (dependenciesByPath.get(filePath) ?? [])
+      );
+      const dependencyHints = uniqueSorted((dependenciesByPath.get(filePath) ?? [])
         .flatMap((dependency) => [dependency.targetPath ?? "", ...dependency.evidence])
         .filter((hint) => hint.length > 0)
         .filter((hint) => tokens.some((token) => hint.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
-      const knowledgeNames = (knowledgeByPath.get(filePath) ?? [])
+      );
+      const knowledgeNames = uniqueSorted((knowledgeByPath.get(filePath) ?? [])
         .map((match) => match.name)
         .filter((name) => tokens.some((token) => name.toLowerCase().includes(token)))
-        .sort((left, right) => left.localeCompare(right));
+      );
       const reasons: string[] = [];
       let score = 0;
       const role = row.role === null || row.role === undefined ? undefined : String(row.role);

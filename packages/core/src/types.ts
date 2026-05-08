@@ -226,6 +226,13 @@ export interface ImportBinding {
   line: number;
 }
 
+export interface VariableTypeHint {
+  name: string;
+  typeName: string;
+  line: number;
+  evidence: string;
+}
+
 export interface EntryHint {
   kind: string;
   line: number;
@@ -270,6 +277,7 @@ export interface FileAnalysis {
   symbols: SymbolDefinition[];
   references: SymbolReference[];
   importBindings: ImportBinding[];
+  localTypeHints: VariableTypeHint[];
   imports: ImportReference[];
   entryHints: EntryHint[];
   diagnostics: Diagnostic[];

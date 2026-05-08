@@ -51,6 +51,12 @@ npm whoami
 - `references`：这个文件里调用/使用了哪些符号
 - `links`：这些引用进一步解析后，指向了哪个内部定义或外部依赖
 
+当前 symbol link 解析会优先利用：
+
+- imports/includes
+- qualifier 上下文
+- 局部变量类型提示，例如 `engine.start()`、`planner.step()`、`foo.run()`
+
 ## 使用方式
 
 ```bash

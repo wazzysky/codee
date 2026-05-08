@@ -6,7 +6,8 @@ import type {
   FileAnalysis,
   SymbolDefinition,
   SymbolLink,
-  SymbolLinkGraph
+  SymbolLinkGraph,
+  VariableTypeHint
 } from "./types.js";
 
 const CPP_SOURCE_EXTENSIONS = [".c", ".cc", ".cpp", ".cxx"];
@@ -23,6 +24,17 @@ function findLocalSymbol(
   return (symbolsByFile.get(filePath) ?? []).find((symbol) => symbol.name === symbolName);
 }
 
+function findContainerSymbol(
+  symbolsByFile: Map<string, SymbolDefinition[]>,
+  filePath: string,
+  symbolName: string,
+  containerName: string
+): SymbolDefinition | undefined {
+  return (symbolsByFile.get(filePath) ?? []).find(
+    (symbol) => symbol.name === symbolName && symbol.containerName === containerName
+  );
+}
+
 function findUniqueGlobalSymbol(
   symbolsByName: Map<string, Array<{ filePath: string; symbol: SymbolDefinition }>>,
   symbolName: string
@@ -37,6 +49,16 @@ function findDependencyForSpecifier(
   specifier: string
 ): DependencyGraphEdge | undefined {
   return (dependencyEdgesByFile.get(filePath) ?? []).find((edge) => edge.specifier === specifier);
+}
+
+function findActiveTypeHint(
+  localTypeHints: VariableTypeHint[],
+  name: string,
+  line: number
+): VariableTypeHint | undefined {
+  return localTypeHints
+    .filter((hint) => hint.name === name && hint.line <= line)
+    .sort((left, right) => right.line - left.line)[0];
 }
 
 function candidateImplementationFiles(headerPath: string, fileSet: Set<string>): string[] {
@@ -69,6 +91,7 @@ function candidateTargetFiles(
 function resolveInternalTarget(
   sourceFilePath: string,
   symbolName: string,
+  containerName: string | undefined,
   dependencyEdge: DependencyGraphEdge | undefined,
   symbolsByFile: Map<string, SymbolDefinition[]>,
   dependencyEdgesByFile: Map<string, DependencyGraphEdge[]>,
@@ -78,7 +101,7 @@ function resolveInternalTarget(
     const candidates = candidateTargetFiles(dependencyEdge.targetPath, dependencyEdgesByFile, fileSet)
       .flatMap((candidateFile) =>
         (symbolsByFile.get(candidateFile) ?? [])
-          .filter((symbol) => symbol.name === symbolName)
+          .filter((symbol) => symbol.name === symbolName && (!containerName || symbol.containerName === containerName))
           .map((symbol) => ({ filePath: candidateFile, symbol }))
       );
 
@@ -97,6 +120,119 @@ function resolveInternalTarget(
         evidence: [
           `Resolved through dependency target "${dependencyEdge.targetPath}".`,
           ...dependencyEdge.evidence
+        ]
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function resolveByTypeHint(
+  analysis: FileAnalysis,
+  reference: FileAnalysis["references"][number],
+  qualifierTypeHint: VariableTypeHint,
+  symbolsByFile: Map<string, SymbolDefinition[]>,
+  dependencyEdgesByFile: Map<string, DependencyGraphEdge[]>,
+  fileSet: Set<string>
+): SymbolLink | undefined {
+  const localMethod = findContainerSymbol(symbolsByFile, analysis.filePath, reference.name, qualifierTypeHint.typeName);
+  if (localMethod) {
+    return {
+      sourceFilePath: analysis.filePath,
+      sourceReferenceName: reference.name,
+      sourceReferenceKind: reference.kind,
+      sourceLine: reference.line,
+      sourceQualifier: reference.qualifier,
+      targetFilePath: analysis.filePath,
+      targetSymbolName: localMethod.name,
+      targetSymbolKind: localMethod.kind,
+      resolution: "local",
+      confidence: 0.97,
+      evidence: [
+        `Resolved via qualifier "${qualifierTypeHint.name}" inferred as type "${qualifierTypeHint.typeName}".`,
+        qualifierTypeHint.evidence
+      ]
+    };
+  }
+
+  const typeBinding = analysis.importBindings.find((item) => item.localName === qualifierTypeHint.typeName);
+  if (typeBinding) {
+    const dependencyEdge = findDependencyForSpecifier(
+      dependencyEdgesByFile,
+      analysis.filePath,
+      typeBinding.sourceSpecifier
+    );
+    if (dependencyEdge?.resolution === "external") {
+      return {
+        sourceFilePath: analysis.filePath,
+        sourceReferenceName: reference.name,
+        sourceReferenceKind: reference.kind,
+        sourceLine: reference.line,
+        sourceQualifier: reference.qualifier,
+        targetSpecifier: typeBinding.sourceSpecifier,
+        resolution: "external",
+        confidence: 0.86,
+        evidence: [
+          `Resolved via qualifier "${qualifierTypeHint.name}" inferred as imported type "${qualifierTypeHint.typeName}".`,
+          qualifierTypeHint.evidence,
+          ...dependencyEdge.evidence
+        ]
+      };
+    }
+
+    if (dependencyEdge?.resolution === "internal") {
+      const internalLink = resolveInternalTarget(
+        analysis.filePath,
+        reference.name,
+        qualifierTypeHint.typeName,
+        dependencyEdge,
+        symbolsByFile,
+        dependencyEdgesByFile,
+        fileSet
+      );
+      if (internalLink) {
+        return {
+          ...internalLink,
+          sourceReferenceKind: reference.kind,
+          sourceLine: reference.line,
+          sourceQualifier: reference.qualifier,
+          confidence: 0.96,
+          evidence: [
+            `Resolved via qualifier "${qualifierTypeHint.name}" inferred as imported type "${qualifierTypeHint.typeName}".`,
+            qualifierTypeHint.evidence,
+            ...internalLink.evidence
+          ]
+        };
+      }
+    }
+  }
+
+  for (const dependencyEdge of dependencyEdgesByFile.get(analysis.filePath) ?? []) {
+    if (dependencyEdge.resolution !== "internal") {
+      continue;
+    }
+
+    const internalLink = resolveInternalTarget(
+      analysis.filePath,
+      reference.name,
+      qualifierTypeHint.typeName,
+      dependencyEdge,
+      symbolsByFile,
+      dependencyEdgesByFile,
+      fileSet
+    );
+    if (internalLink) {
+      return {
+        ...internalLink,
+        sourceReferenceKind: reference.kind,
+        sourceLine: reference.line,
+        sourceQualifier: reference.qualifier,
+        confidence: 0.94,
+        evidence: [
+          `Resolved via qualifier "${qualifierTypeHint.name}" inferred as type "${qualifierTypeHint.typeName}".`,
+          qualifierTypeHint.evidence,
+          ...internalLink.evidence
         ]
       };
     }
@@ -137,6 +273,23 @@ export function buildSymbolLinks(
   for (const analysis of sortedAnalyses) {
     const dependencies = dependencyEdgesByFile.get(analysis.filePath) ?? [];
     for (const reference of analysis.references) {
+      const qualifierTypeHint =
+        reference.qualifier ? findActiveTypeHint(analysis.localTypeHints, reference.qualifier, reference.line) : undefined;
+      if (reference.qualifier && qualifierTypeHint) {
+        const typeHintLink = resolveByTypeHint(
+          analysis,
+          reference,
+          qualifierTypeHint,
+          symbolsByFile,
+          dependencyEdgesByFile,
+          fileSet
+        );
+        if (typeHintLink) {
+          links.push(typeHintLink);
+          continue;
+        }
+      }
+
       const localSymbol = findLocalSymbol(symbolsByFile, analysis.filePath, reference.name);
       if (localSymbol) {
         links.push({
@@ -180,6 +333,7 @@ export function buildSymbolLinks(
           const internalLink = resolveInternalTarget(
             analysis.filePath,
             binding.importedName === "default" ? reference.name : (binding.importedName ?? reference.name),
+            undefined,
             dependencyEdge,
             symbolsByFile,
             dependencyEdgesByFile,
@@ -203,6 +357,7 @@ export function buildSymbolLinks(
         resolvedLink = resolveInternalTarget(
           analysis.filePath,
           reference.name,
+          undefined,
           dependencyEdge,
           symbolsByFile,
           dependencyEdgesByFile,

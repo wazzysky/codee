@@ -1,11 +1,13 @@
-import Engine, { ArrowTool, helper } from "./lib";
+import Engine, { ArrowTool, ConsoleEngine, helper } from "./lib";
 import ReactDOM from "react-dom/client";
 import { Panel } from "./ui";
 
 export class Bootstrapper {
   run(): void {
     const engine = new Engine();
+    const consoleEngine = new ConsoleEngine();
     console.log(engine.start());
+    console.log(consoleEngine.start());
   }
 }
 

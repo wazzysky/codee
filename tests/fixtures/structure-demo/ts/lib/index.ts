@@ -4,6 +4,12 @@ export default class Engine {
   }
 }
 
+export class ConsoleEngine {
+  start(): string {
+    return "console";
+  }
+}
+
 export function helper(value: number): number {
   return value + 1;
 }

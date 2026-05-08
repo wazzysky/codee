@@ -2,6 +2,7 @@
 #include "local.hpp"
 #include "utils/math.h"
 
+void AltGreeter::greet() {}
 void Greeter::greet() {}
 
 int main() {
