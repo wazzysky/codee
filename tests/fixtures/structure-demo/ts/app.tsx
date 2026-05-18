@@ -1,6 +1,8 @@
 import Engine, { ArrowTool, ConsoleEngine, helper } from "./lib";
 import ReactDOM from "react-dom/client";
 import { Panel } from "./ui";
+import { Toolset } from "./tools/barrel";
+import * as ToolModule from "./tools/barrel";
 
 export class Bootstrapper {
   run(): void {
@@ -12,7 +14,8 @@ export class Bootstrapper {
 }
 
 export function App(): JSX.Element {
-  return <Panel label={String(ArrowTool(helper(1)))} />;
+  const label = Toolset.createLabel(String(ArrowTool(helper(1))));
+  return <Panel label={ToolModule.createBadge(label)} />;
 }
 
 export const MainView = (): JSX.Element => <App />;

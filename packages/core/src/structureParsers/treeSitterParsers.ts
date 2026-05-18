@@ -2,6 +2,7 @@ import path from "node:path";
 import type {
   Diagnostic,
   EntryHint,
+  ExportBinding,
   FileAnalysis,
   ImportBinding,
   StructureParseInput,
@@ -10,6 +11,11 @@ import type {
   SymbolDefinition,
   VariableTypeHint
 } from "../types.js";
+import {
+  parseScriptAssignedSymbolFromText,
+  parseScriptExportArtifactsFromContent,
+  parseScriptExportBindingsFromText
+} from "./exportBindings.js";
 
 type TreeSitterModule = {
   default?: new () => {
@@ -139,13 +145,16 @@ function extractCallTargetName(node: TreeSitterNode): string | undefined {
 function extractCallQualifier(node: TreeSitterNode): string | undefined {
   const functionNode = node.childForFieldName?.("function");
   if (functionNode?.text && functionNode.text.includes(".")) {
-    const parts = functionNode.text.split(".");
-    if (parts.length >= 2) {
-      return extractTrailingIdentifier(parts[parts.length - 2] ?? "");
+    const sanitized = functionNode.text.trim().replace(/\?\./gu, ".");
+    const memberMatch = /^(.*)\.[A-Za-z_]\w*$/u.exec(sanitized);
+    if (memberMatch) {
+      return memberMatch[1]?.trim();
     }
   }
 
-  const match = /^([A-Za-z_]\w*)\.[A-Za-z_]\w*\s*\(/u.exec(node.text.trim());
+  const match = /^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.[A-Za-z_]\w*\s*\(/u.exec(
+    node.text.trim().replace(/\?\./gu, ".")
+  );
   return match?.[1];
 }
 
@@ -220,8 +229,20 @@ function parseImportBindingsFromText(text: string, specifier: string, line: numb
     return bindings;
   }
 
+  const importEqualsMatch = /^\s*import\s+([A-Za-z_]\w*)\s*=\s*require\(\s*["'][^"']+["']\s*\)/u.exec(text);
+  if (importEqualsMatch) {
+    bindings.push({
+      localName: importEqualsMatch[1],
+      importedName: "default",
+      sourceSpecifier: specifier,
+      kind: "default",
+      line
+    });
+    return bindings;
+  }
+
   const clauseMatch = /^\s*import\s+(.+?)\s+from\s+["'][^"']+["']/u.exec(text);
-  const clause = clauseMatch?.[1]?.trim();
+  const clause = clauseMatch?.[1]?.trim().replace(/^type\s+/u, "");
   if (!clause) {
     return bindings;
   }
@@ -254,7 +275,7 @@ function parseImportBindingsFromText(text: string, specifier: string, line: numb
   const namedPart = (namedPartRaw ?? (defaultPart?.startsWith("{") ? defaultPart : undefined))?.trim();
   if (namedPart?.startsWith("{") && namedPart.endsWith("}")) {
     for (const member of namedPart.slice(1, -1).split(",")) {
-      const trimmedMember = member.trim();
+      const trimmedMember = member.trim().replace(/^type\s+/u, "");
       const aliasMatch = /^([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?$/u.exec(trimmedMember);
       if (!aliasMatch) {
         continue;
@@ -335,6 +356,7 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const exportBindings: ExportBinding[] = [];
   const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
@@ -408,7 +430,9 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
     } else if (language === "TypeScript" || language === "JavaScript") {
       if (node.type === "import_statement") {
         const sourceNode = node.childForFieldName?.("source");
-        const specifier = sourceNode?.text.replace(/^['"]|['"]$/gu, "");
+        const specifier =
+          sourceNode?.text.replace(/^['"]|['"]$/gu, "") ??
+          /require\(\s*["']([^"']+)["']\s*\)/u.exec(node.text)?.[1];
         if (specifier) {
           imports.push(
             createImportReference(
@@ -423,6 +447,22 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
             ...parseImportBindingsFromText(node.text, specifier, node.startPosition.row + 1, language)
           );
         }
+      }
+
+      const parsedExportBindings = parseScriptExportBindingsFromText(node.text, node.startPosition.row + 1);
+      if (parsedExportBindings.length > 0) {
+        exportBindings.push(...parsedExportBindings);
+        const assignedSymbol = parseScriptAssignedSymbolFromText(node.text);
+        if (assignedSymbol) {
+          addSymbol(
+            symbols,
+            assignedSymbol.name,
+            assignedSymbol.kind,
+            node,
+            containerName,
+            assignedSymbol.signature
+          );
+        }
       } else if (node.type === "class_declaration") {
         const nameNode = node.childForFieldName?.("name");
         if (nameNode) {
@@ -434,6 +474,11 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
           const kind =
             /\.(tsx|jsx)$/iu.test(filePath) && /^[A-Z]/u.test(nameNode.text) ? "component" : "function";
           addSymbol(symbols, nameNode.text, kind, node, containerName, node.text.split(/\r?\n/u)[0]?.trim());
+        }
+      } else if (node.type === "interface_declaration" || node.type === "type_alias_declaration") {
+        const nameNode = node.childForFieldName?.("name");
+        if (nameNode) {
+          addSymbol(symbols, nameNode.text, "type", node, containerName, node.text.split(/\r?\n/u)[0]?.trim());
         }
       } else if (node.type === "method_definition") {
         const nameNode = node.childForFieldName?.("name");
@@ -569,6 +614,38 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
 
   visit(rootNode);
 
+  if (language === "TypeScript" || language === "JavaScript") {
+    for (const [index, line] of rootNode.text.split(/\r?\n/u).entries()) {
+      const parsedExportBindings = parseScriptExportBindingsFromText(line.trim(), index + 1);
+      if (parsedExportBindings.length > 0) {
+        exportBindings.push(...parsedExportBindings);
+      }
+
+      const assignedSymbol = parseScriptAssignedSymbolFromText(line.trim());
+      if (assignedSymbol) {
+        symbols.push({
+          name: assignedSymbol.name,
+          kind: assignedSymbol.kind,
+          startLine: index + 1,
+          endLine: index + 1,
+          signature: assignedSymbol.signature
+        });
+      }
+    }
+
+    const parsedArtifacts = parseScriptExportArtifactsFromContent(rootNode.text);
+    exportBindings.push(...parsedArtifacts.bindings);
+    for (const assignedSymbol of parsedArtifacts.assignedSymbols) {
+      symbols.push({
+        name: assignedSymbol.name,
+        kind: assignedSymbol.kind,
+        startLine: assignedSymbol.line,
+        endLine: assignedSymbol.line,
+        signature: assignedSymbol.signature
+      });
+    }
+  }
+
   return {
     filePath: normalizePath(filePath),
     language,
@@ -596,6 +673,16 @@ function parseWithTreeSitter(language: string, filePath: string, rootNode: TreeS
           ? `${left.sourceSpecifier}:${left.localName}`.localeCompare(`${right.sourceSpecifier}:${right.localName}`)
           : left.line - right.line
       ),
+    exportBindings: exportBindings
+      .slice()
+      .sort((left, right) =>
+        left.line === right.line
+          ? `${left.exportedName}:${left.localName ?? ""}:${left.sourceSpecifier ?? ""}`.localeCompare(
+              `${right.exportedName}:${right.localName ?? ""}:${right.sourceSpecifier ?? ""}`
+            )
+          : left.line - right.line
+      ),
+    scopeBindings: [],
     localTypeHints: localTypeHints
       .slice()
       .sort((left, right) =>
@@ -655,6 +742,8 @@ async function createTreeSitterParser(language: string): Promise<StructureParser
             symbols: [],
             references: [],
             importBindings: [],
+            exportBindings: [],
+            scopeBindings: [],
             localTypeHints: [],
             imports: [],
             entryHints: [],

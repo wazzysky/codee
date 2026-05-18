@@ -172,8 +172,13 @@ export function renderIndexSummaryMarkdown(result: IndexSummary): string {
     `Removed Files: ${result.removedFiles}`,
     `Knowledge Matches: ${result.knowledgeMatchCount}`,
     `Symbols: ${result.symbolCount}`,
+    `Core Symbols: ${result.coreSymbolCount}`,
     `References: ${result.referenceCount}`,
+    `Namespace Nodes: ${result.namespaceNodeCount}`,
+    `Namespace Edges: ${result.namespaceEdgeCount}`,
+    `Scope Bindings: ${result.scopeBindingCount}`,
     `Symbol Links: ${result.symbolLinkCount}`,
+    `Symbol Calls: ${result.symbolCallCount}`,
     `Dependencies: ${result.dependencyCount}`,
     `Diagnostics: ${result.diagnosticCount}`,
     ""

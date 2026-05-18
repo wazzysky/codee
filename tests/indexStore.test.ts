@@ -6,8 +6,15 @@ import {
   getFile,
   indexRepository,
   listDependencies,
+  listExportBindings,
   listFiles,
   listKnowledgeMatches,
+  listNamespaceSymbolEdges,
+  listNamespaceSymbolNodes,
+  listScopeBindings,
+  listSymbolCalls,
+  listSymbolRankings,
+  listSymbolReferenceEdges,
   listSymbolLinks,
   listSymbolReferences,
   listSymbols,
@@ -50,7 +57,7 @@ describe("SQLiteIndexStore", () => {
     expect(files.some((file) => file.path === "src/ros_node.py")).toBe(true);
   });
 
-  it("supports getFile, searchFiles, listKnowledgeMatches, listSymbols, and listDependencies queries", async () => {
+  it("supports getFile, searchFiles, listKnowledgeMatches, listSymbols, listExportBindings, listScopeBindings, listSymbolReferenceEdges, and listDependencies queries", async () => {
     const repoRoot = await copyFixture("knowledge-demo");
     await indexRepository(repoRoot);
 
@@ -87,6 +94,38 @@ describe("SQLiteIndexStore", () => {
       ])
     );
 
+    await expect(listExportBindings(repoRoot, "src/App.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "src/App.tsx",
+          exportedName: "App",
+          kind: "named"
+        })
+      ])
+    );
+
+    await expect(listNamespaceSymbolNodes(repoRoot, "src/App.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "src/App.tsx",
+          path: "App",
+          kind: "export",
+          localName: "App"
+        })
+      ])
+    );
+    await expect(listNamespaceSymbolEdges(repoRoot, "src/App.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "src/App.tsx",
+          fromPath: "App",
+          toPath: "App",
+          kind: "resolves-to",
+          targetSymbolName: "App"
+        })
+      ])
+    );
+
     await expect(listDependencies(repoRoot, "src/main.tsx")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -97,6 +136,19 @@ describe("SQLiteIndexStore", () => {
         })
       ])
     );
+
+    await expect(listScopeBindings(repoRoot, "src/App.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "src/App.tsx",
+          name: "App",
+          kind: "symbol"
+        })
+      ])
+    );
+
+    await expect(listSymbolReferenceEdges(repoRoot, "src/App.tsx")).resolves.toEqual([]);
+
   });
 
   it("persists structured symbols, symbol references, and internal dependencies from structure analysis", async () => {
@@ -104,7 +156,9 @@ describe("SQLiteIndexStore", () => {
     const summary = await indexRepository(repoRoot);
 
     expect(summary.referenceCount).toBeGreaterThan(0);
+    expect(summary.scopeBindingCount).toBeGreaterThan(0);
     expect(summary.symbolLinkCount).toBeGreaterThan(0);
+    expect(summary.symbolCallCount).toBeGreaterThan(0);
     await expect(listSymbols(repoRoot, "ts/app.tsx")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -151,6 +205,23 @@ describe("SQLiteIndexStore", () => {
       ])
     );
 
+    await expect(listDependencies(repoRoot, "ts/interop.ts")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourcePath: "ts/interop.ts",
+          specifier: "./legacy-cjs",
+          resolution: "internal",
+          resolved: true
+        }),
+        expect.objectContaining({
+          sourcePath: "ts/interop.ts",
+          specifier: "./legacy",
+          resolution: "internal",
+          resolved: true
+        })
+      ])
+    );
+
     await expect(listSymbolLinks(repoRoot, "ts/app.tsx")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -158,6 +229,69 @@ describe("SQLiteIndexStore", () => {
           sourceReferenceName: "createRoot",
           targetSpecifier: "react-dom/client",
           resolution: "external"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/app.tsx",
+          sourceReferenceName: "Panel",
+          targetFilePath: "ts/ui/panel.tsx",
+          targetSymbolName: "Panel",
+          resolution: "internal"
+        })
+      ])
+    );
+
+    await expect(listExportBindings(repoRoot, "ts/ui/index.ts")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/ui/index.ts",
+          exportedName: "Panel",
+          localName: "Panel",
+          sourceSpecifier: "./panel",
+          kind: "named"
+        })
+      ])
+    );
+
+    await expect(listNamespaceSymbolNodes(repoRoot, "ts/object-cjs.js")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          path: "nested",
+          kind: "namespace"
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          path: "nested.createNestedRunner",
+          kind: "export",
+          localName: "createObjectRunner"
+        })
+      ])
+    );
+
+    await expect(listNamespaceSymbolEdges(repoRoot, "ts/object-cjs.js")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          fromPath: "nested",
+          toPath: "nested.createNestedRunner",
+          kind: "contains"
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          fromPath: "nested.createNestedRunner",
+          toPath: "createObjectRunner",
+          kind: "resolves-to"
+        })
+      ])
+    );
+
+    await expect(listSymbolRankings(repoRoot, "ts/object-cjs.js")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          symbolName: "createObjectRunner",
+          namespaceExportCount: expect.any(Number),
+          score: expect.any(Number)
         })
       ])
     );
@@ -169,6 +303,129 @@ describe("SQLiteIndexStore", () => {
           sourceReferenceName: "compute_value",
           targetFilePath: "cpp/utils/math.cpp",
           targetSymbolName: "compute_value",
+          resolution: "internal"
+        })
+      ])
+    );
+
+    await expect(listScopeBindings(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "ReactDOM",
+          kind: "import"
+        }),
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          name: "engine",
+          kind: "variable"
+        })
+      ])
+    );
+
+    await expect(listSymbolCalls(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          callerFilePath: "ts/app.tsx",
+          callerSymbolName: "bootstrap",
+          calleeSymbolName: "createRoot",
+          resolution: "external"
+        }),
+        expect.objectContaining({
+          callerFilePath: "ts/app.tsx",
+          callerSymbolName: "App",
+          calleeFilePath: "ts/ui/panel.tsx",
+          calleeSymbolName: "Panel",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          callerFilePath: "ts/app.tsx",
+          callerSymbolName: "App",
+          calleeFilePath: "ts/tools/index.ts",
+          calleeSymbolName: "createLabel",
+          resolution: "internal"
+        })
+      ])
+    );
+
+    await expect(listSymbolReferenceEdges(repoRoot, "ts/app.tsx")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFilePath: "ts/app.tsx",
+          sourceSymbolName: "App",
+          sourceReferenceName: "createLabel",
+          sourceQualifier: "Toolset",
+          targetFilePath: "ts/tools/index.ts",
+          targetSymbolName: "createLabel",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/app.tsx",
+          sourceSymbolName: "App",
+          sourceReferenceName: "createBadge",
+          sourceQualifier: "ToolModule",
+          targetFilePath: "ts/tools/index.ts",
+          targetSymbolName: "createBadge",
+          resolution: "internal"
+        })
+      ])
+    );
+
+    await expect(listSymbolReferenceEdges(repoRoot, "ts/interop.ts")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFilePath: "ts/interop.ts",
+          sourceSymbolName: "useLegacy",
+          sourceReferenceName: "LegacyOptions",
+          targetFilePath: "ts/legacy.ts",
+          targetSymbolName: "LegacyOptions",
+          targetSymbolKind: "type",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/interop.ts",
+          sourceSymbolName: "useLegacy",
+          sourceReferenceName: "CommonRunner",
+          targetFilePath: "ts/legacy-cjs.js",
+          targetSymbolName: "CommonRunner",
+          resolution: "internal"
+        })
+      ])
+    );
+
+    await expect(listSymbolReferenceEdges(repoRoot, "ts/object-interop.ts")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFilePath: "ts/object-interop.ts",
+          sourceSymbolName: "useObjectInterop",
+          sourceReferenceName: "namedFactory",
+          targetFilePath: "ts/object-cjs.js",
+          targetSymbolName: "createObjectRunner",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/object-interop.ts",
+          sourceSymbolName: "useObjectInterop",
+          sourceReferenceName: "inlineFactory",
+          targetFilePath: "ts/object-cjs.js",
+          targetSymbolName: "inlineFactory",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/object-interop.ts",
+          sourceSymbolName: "useObjectInterop",
+          sourceReferenceName: "computedFactory",
+          targetFilePath: "ts/object-cjs.js",
+          targetSymbolName: "createObjectRunner",
+          resolution: "internal"
+        }),
+        expect.objectContaining({
+          sourceFilePath: "ts/object-interop.ts",
+          sourceSymbolName: "useObjectInterop",
+          sourceReferenceName: "createNestedRunner",
+          sourceQualifier: "ObjectModule.nested",
+          targetFilePath: "ts/object-cjs.js",
+          targetSymbolName: "createObjectRunner",
           resolution: "internal"
         })
       ])

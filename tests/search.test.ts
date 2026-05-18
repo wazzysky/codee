@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { indexRepository, scanRepository, searchRepository } from "../packages/core/src/index";
+import { executeSqlite, toSqlLiteral } from "../packages/core/src/indexStore/sqliteCli";
 
 const tempDirs: string[] = [];
 
@@ -75,8 +76,31 @@ describe("searchRepository", () => {
     await expect(searchRepository(repoRoot, "createRoot")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          filePath: "ts/app.tsx"
+        })
+      ])
+    );
+
+    const createRootResults = await searchRepository(repoRoot, "createRoot");
+    expect(createRootResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           filePath: "ts/app.tsx",
-          matchedReferences: expect.arrayContaining(["createRoot"])
+          matchedReferences: expect.arrayContaining(["createRoot"]),
+          matchedCalls: expect.arrayContaining(["createRoot"])
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "Panel")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/ui/index.ts",
+          matchedExports: expect.arrayContaining(["Panel"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/ui/panel.tsx",
+          matchedSymbols: expect.arrayContaining(["Panel"])
         })
       ])
     );
@@ -85,7 +109,8 @@ describe("searchRepository", () => {
       expect.arrayContaining([
         expect.objectContaining({
           filePath: "cpp/main.cpp",
-          matchedLinks: expect.arrayContaining(["cpp/utils/math.cpp"])
+          matchedLinks: expect.arrayContaining(["cpp/utils/math.cpp"]),
+          matchedCalls: expect.arrayContaining(["cpp/utils/math.cpp"])
         })
       ])
     );
@@ -94,6 +119,85 @@ describe("searchRepository", () => {
       expect.arrayContaining([
         expect.objectContaining({
           filePath: "ts/ui/panel.tsx"
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "createBadge")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/app.tsx",
+          matchedCalls: expect.arrayContaining(["createBadge"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/tools/index.ts",
+          matchedSymbols: expect.arrayContaining(["createBadge"])
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "LegacyOptions")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/interop.ts"
+        }),
+        expect.objectContaining({
+          filePath: "ts/legacy.ts"
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "namedFactory")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-interop.ts",
+          matchedReferences: expect.arrayContaining(["namedFactory"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          matchedExports: expect.arrayContaining(["namedFactory"])
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "inlineFactory")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-interop.ts",
+          matchedReferences: expect.arrayContaining(["inlineFactory"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          matchedExports: expect.arrayContaining(["inlineFactory"])
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "computedFactory")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-interop.ts",
+          matchedReferences: expect.arrayContaining(["computedFactory"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          matchedExports: expect.arrayContaining(["computedFactory"])
+        })
+      ])
+    );
+
+    await expect(searchRepository(repoRoot, "createNestedRunner")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-interop.ts",
+          matchedReferences: expect.arrayContaining(["createNestedRunner"]),
+          matchedCoreSymbols: expect.any(Array)
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          matchedNamespaces: expect.arrayContaining(["nested.createNestedRunner"]),
+          matchedCoreSymbols: expect.arrayContaining(["createObjectRunner"]),
+          matchedExports: expect.arrayContaining(["nested.createNestedRunner"])
         })
       ])
     );
@@ -120,6 +224,33 @@ describe("searchRepository", () => {
         expect.objectContaining({
           filePath: "cpp/main.cpp",
           matchedImports: expect.arrayContaining(["utils/math.h"])
+        })
+      ])
+    );
+  });
+
+  it("falls back to temporary analysis when the persisted structure index is stale", async () => {
+    const repoRoot = await copyFixture("structure-demo");
+    await indexRepository(repoRoot);
+
+    await executeSqlite(
+      path.join(repoRoot, ".repolain", "index.sqlite"),
+      `
+        UPDATE repository_metadata
+        SET value = ${toSqlLiteral("stale-version")}
+        WHERE key = 'structure_index_version';
+      `
+    );
+
+    await expect(searchRepository(repoRoot, "namedFactory")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: "ts/object-interop.ts",
+          matchedReferences: expect.arrayContaining(["namedFactory"])
+        }),
+        expect.objectContaining({
+          filePath: "ts/object-cjs.js",
+          matchedExports: expect.arrayContaining(["namedFactory"])
         })
       ])
     );

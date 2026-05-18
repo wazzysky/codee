@@ -1,8 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { buildSymbolCallGraph } from "./buildSymbolCallGraph.js";
+import { buildSymbolCentralityGraph } from "./buildSymbolCentralityGraph.js";
 import { buildDependencyGraph } from "./buildDependencyGraph.js";
+import { buildNamespaceSymbolGraph } from "./buildNamespaceSymbolGraph.js";
+import { buildSymbolReferenceGraph } from "./buildSymbolReferenceGraph.js";
 import { buildSymbolLinks } from "./buildSymbolLinks.js";
 import { createStructureParserRegistry, StructureParserRegistry } from "./structureParserRegistry.js";
+import { buildScopeBindings } from "./scopeBindings.js";
 import type { Diagnostic, FileAnalysis, ScanResult, StructureParseInput, SymbolExtractionResult } from "./types.js";
 
 const SUPPORTED_LANGUAGES = new Set(["Python", "TypeScript", "JavaScript", "C", "C++"]);
@@ -103,6 +108,32 @@ function uniqSortedImportBindings(importBindings: FileAnalysis["importBindings"]
     });
 }
 
+function uniqSortedExportBindings(exportBindings: FileAnalysis["exportBindings"]): FileAnalysis["exportBindings"] {
+  return exportBindings
+    .slice()
+    .sort((left, right) =>
+      left.line === right.line
+        ? `${left.exportedName}:${left.localName ?? ""}:${left.sourceSpecifier ?? ""}`.localeCompare(
+            `${right.exportedName}:${right.localName ?? ""}:${right.sourceSpecifier ?? ""}`
+          )
+        : left.line - right.line
+    )
+    .filter((binding, index, items) => {
+      if (index === 0) {
+        return true;
+      }
+
+      const previous = items[index - 1];
+      return !(
+        previous.line === binding.line &&
+        previous.exportedName === binding.exportedName &&
+        previous.localName === binding.localName &&
+        previous.sourceSpecifier === binding.sourceSpecifier &&
+        previous.kind === binding.kind
+      );
+    });
+}
+
 function uniqSortedLocalTypeHints(localTypeHints: FileAnalysis["localTypeHints"]): FileAnalysis["localTypeHints"] {
   return localTypeHints
     .slice()
@@ -122,6 +153,37 @@ function uniqSortedLocalTypeHints(localTypeHints: FileAnalysis["localTypeHints"]
         previous.name === hint.name &&
         previous.typeName === hint.typeName &&
         previous.evidence === hint.evidence
+      );
+    });
+}
+
+function uniqSortedScopeBindings(scopeBindings: FileAnalysis["scopeBindings"]): FileAnalysis["scopeBindings"] {
+  return scopeBindings
+    .slice()
+    .sort((left, right) =>
+      left.line === right.line
+        ? `${left.name}:${left.kind}:${left.containerName ?? ""}`.localeCompare(
+            `${right.name}:${right.kind}:${right.containerName ?? ""}`
+          )
+        : left.line - right.line
+    )
+    .filter((binding, index, items) => {
+      if (index === 0) {
+        return true;
+      }
+
+      const previous = items[index - 1];
+      return !(
+        previous.name === binding.name &&
+        previous.kind === binding.kind &&
+        previous.line === binding.line &&
+        previous.scopeStartLine === binding.scopeStartLine &&
+        previous.scopeEndLine === binding.scopeEndLine &&
+        previous.containerName === binding.containerName &&
+        previous.typeName === binding.typeName &&
+        previous.sourceSpecifier === binding.sourceSpecifier &&
+        previous.importedName === binding.importedName &&
+        previous.symbolKind === binding.symbolKind
       );
     });
 }
@@ -186,16 +248,34 @@ export async function analyzeFileStructure(
 
   try {
     const analysis = await registry.parse(input);
-    return {
+    const normalizedAnalysis = {
       ...analysis,
-      filePath: normalizePath(analysis.filePath),
-      symbols: uniqSortedSymbols(analysis.symbols),
-      references: uniqSortedReferences(analysis.references),
-      importBindings: uniqSortedImportBindings(analysis.importBindings),
-      localTypeHints: uniqSortedLocalTypeHints(analysis.localTypeHints),
-      imports: uniqSortedImports(analysis.imports),
-      entryHints: uniqSortedEntryHints(analysis.entryHints),
-      diagnostics: uniqSortedDiagnostics(analysis.diagnostics)
+      scopeBindings:
+        analysis.scopeBindings.length > 0
+          ? analysis.scopeBindings
+          : buildScopeBindings({
+              filePath: analysis.filePath,
+              language: analysis.language,
+              symbols: analysis.symbols,
+              importBindings: analysis.importBindings,
+              localTypeHints: analysis.localTypeHints,
+              references: analysis.references,
+              imports: analysis.imports,
+              entryHints: analysis.entryHints
+            })
+    };
+    return {
+      ...normalizedAnalysis,
+      filePath: normalizePath(normalizedAnalysis.filePath),
+      symbols: uniqSortedSymbols(normalizedAnalysis.symbols),
+      references: uniqSortedReferences(normalizedAnalysis.references),
+      importBindings: uniqSortedImportBindings(normalizedAnalysis.importBindings),
+      exportBindings: uniqSortedExportBindings(normalizedAnalysis.exportBindings),
+      scopeBindings: uniqSortedScopeBindings(normalizedAnalysis.scopeBindings),
+      localTypeHints: uniqSortedLocalTypeHints(normalizedAnalysis.localTypeHints),
+      imports: uniqSortedImports(normalizedAnalysis.imports),
+      entryHints: uniqSortedEntryHints(normalizedAnalysis.entryHints),
+      diagnostics: uniqSortedDiagnostics(normalizedAnalysis.diagnostics)
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -206,6 +286,8 @@ export async function analyzeFileStructure(
       symbols: [],
       references: [],
       importBindings: [],
+      exportBindings: [],
+      scopeBindings: [],
       localTypeHints: [],
       imports: [],
       entryHints: [],
@@ -250,6 +332,8 @@ export async function extractRepositorySymbols(
         symbols: [],
         references: [],
         importBindings: [],
+        exportBindings: [],
+        scopeBindings: [],
         localTypeHints: [],
         imports: [],
         entryHints: [],
@@ -265,12 +349,33 @@ export async function extractRepositorySymbols(
   }
 
   const dependencyGraph = buildDependencyGraph(scanResult.root, files);
-  const symbolLinkGraph = buildSymbolLinks(scanResult.root, files, dependencyGraph);
+  const namespaceGraph = buildNamespaceSymbolGraph(scanResult.root, files);
+  const symbolLinkGraph = buildSymbolLinks(scanResult.root, files, dependencyGraph, namespaceGraph);
+  const symbolReferenceGraph = buildSymbolReferenceGraph(scanResult.root, files, symbolLinkGraph.links);
+  const symbolCallGraph = buildSymbolCallGraph(scanResult.root, symbolReferenceGraph);
+  const symbolCentralityGraph = buildSymbolCentralityGraph(
+    scanResult.root,
+    files,
+    namespaceGraph,
+    symbolReferenceGraph,
+    symbolCallGraph
+  );
 
   return {
     root: scanResult.root,
     files,
+    namespaces: namespaceGraph,
     links: symbolLinkGraph.links,
-    diagnostics: uniqSortedDiagnostics(diagnostics)
+    referenceEdges: symbolReferenceGraph.edges,
+    calls: symbolCallGraph.calls,
+    coreSymbols: symbolCentralityGraph,
+    diagnostics: uniqSortedDiagnostics([
+      ...diagnostics,
+      ...namespaceGraph.diagnostics,
+      ...symbolLinkGraph.diagnostics,
+      ...symbolReferenceGraph.diagnostics,
+      ...symbolCallGraph.diagnostics,
+      ...symbolCentralityGraph.diagnostics
+    ])
   };
 }

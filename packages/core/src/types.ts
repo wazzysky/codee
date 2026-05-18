@@ -171,6 +171,10 @@ export interface FileSearchResult {
   matchedSymbols: string[];
   matchedKnowledge: string[];
   matchedImports: string[];
+  matchedNamespaces: string[];
+  matchedExports: string[];
+  matchedCalls: string[];
+  matchedCoreSymbols: string[];
   dependencyHints: string[];
   matchedReferences: string[];
   matchedLinks: string[];
@@ -185,18 +189,34 @@ export interface IndexSummary {
   knowledgeMatchCount: number;
   symbolCount: number;
   referenceCount: number;
+  namespaceNodeCount: number;
+  namespaceEdgeCount: number;
+  coreSymbolCount: number;
+  scopeBindingCount: number;
   symbolLinkCount: number;
+  symbolCallCount: number;
   dependencyCount: number;
   diagnosticCount: number;
   projectTypes: string[];
 }
 
-export type SymbolKind = "function" | "class" | "method" | "component";
+export type SymbolKind = "function" | "class" | "method" | "component" | "type";
 export type SymbolReferenceKind = "call" | "new" | "component" | "type";
 export type ImportBindingKind = "default" | "named" | "namespace" | "module";
+export type ExportBindingKind = "default" | "named" | "all" | "namespace";
+export type ScopeBindingKind =
+  | "symbol"
+  | "import"
+  | "module"
+  | "parameter"
+  | "variable"
+  | "implicit-this"
+  | "implicit-self";
 export type DependencyKind = "import" | "include";
 export type DependencyResolution = "internal" | "external" | "unresolved";
 export type SymbolLinkResolution = "local" | "internal" | "external" | "global" | "unresolved";
+export type NamespaceSymbolNodeKind = "namespace" | "export";
+export type NamespaceSymbolEdgeKind = "contains" | "resolves-to";
 
 export interface SymbolDefinition {
   name: string;
@@ -226,10 +246,32 @@ export interface ImportBinding {
   line: number;
 }
 
+export interface ExportBinding {
+  exportedName: string;
+  localName?: string;
+  sourceSpecifier?: string;
+  kind: ExportBindingKind;
+  line: number;
+}
+
 export interface VariableTypeHint {
   name: string;
   typeName: string;
   line: number;
+  evidence: string;
+}
+
+export interface ScopeBinding {
+  name: string;
+  kind: ScopeBindingKind;
+  line: number;
+  scopeStartLine: number;
+  scopeEndLine: number;
+  containerName?: string;
+  typeName?: string;
+  sourceSpecifier?: string;
+  importedName?: string;
+  symbolKind?: SymbolKind;
   evidence: string;
 }
 
@@ -270,6 +312,103 @@ export interface SymbolLinkGraph {
   diagnostics: Diagnostic[];
 }
 
+export interface SymbolReferenceEdge {
+  sourceFilePath: string;
+  sourceSymbolName: string;
+  sourceSymbolKind: SymbolKind;
+  sourceSymbolId: string;
+  sourceLine: number;
+  sourceReferenceName: string;
+  sourceReferenceKind: SymbolReferenceKind;
+  sourceQualifier?: string;
+  targetFilePath?: string;
+  targetSymbolName?: string;
+  targetSymbolKind?: SymbolKind;
+  targetSymbolId?: string;
+  targetSpecifier?: string;
+  resolution: SymbolLinkResolution;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface SymbolReferenceGraph {
+  root: string;
+  edges: SymbolReferenceEdge[];
+  diagnostics: Diagnostic[];
+}
+
+export interface SymbolCallEdge {
+  callerFilePath: string;
+  callerSymbolName: string;
+  callerSymbolKind: SymbolKind;
+  callerSymbolId: string;
+  callerLine: number;
+  calleeFilePath?: string;
+  calleeSymbolName: string;
+  calleeSymbolKind?: SymbolKind;
+  calleeSymbolId?: string;
+  calleeSpecifier?: string;
+  referenceKind: Exclude<SymbolReferenceKind, "type">;
+  resolution: SymbolLinkResolution;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface SymbolCallGraph {
+  root: string;
+  calls: SymbolCallEdge[];
+  diagnostics: Diagnostic[];
+}
+
+export interface SymbolCentralityScore {
+  symbolId: string;
+  filePath: string;
+  symbolName: string;
+  symbolKind: SymbolKind;
+  score: number;
+  normalizedScore: number;
+  incomingReferenceCount: number;
+  incomingCallCount: number;
+  outgoingCallCount: number;
+  namespaceExportCount: number;
+  evidence: string[];
+}
+
+export interface SymbolCentralityGraph {
+  root: string;
+  rankings: SymbolCentralityScore[];
+  diagnostics: Diagnostic[];
+}
+
+export interface NamespaceSymbolNode {
+  filePath: string;
+  path: string;
+  kind: NamespaceSymbolNodeKind;
+  line: number;
+  parentPath?: string;
+  localName?: string;
+  sourceSpecifier?: string;
+  exportKind?: ExportBindingKind;
+}
+
+export interface NamespaceSymbolEdge {
+  filePath: string;
+  fromPath: string;
+  toPath: string;
+  kind: NamespaceSymbolEdgeKind;
+  line: number;
+  targetSymbolName?: string;
+  targetSpecifier?: string;
+  evidence: string[];
+}
+
+export interface NamespaceSymbolGraph {
+  root: string;
+  nodes: NamespaceSymbolNode[];
+  edges: NamespaceSymbolEdge[];
+  diagnostics: Diagnostic[];
+}
+
 export interface FileAnalysis {
   filePath: string;
   language: string;
@@ -277,6 +416,8 @@ export interface FileAnalysis {
   symbols: SymbolDefinition[];
   references: SymbolReference[];
   importBindings: ImportBinding[];
+  exportBindings: ExportBinding[];
+  scopeBindings: ScopeBinding[];
   localTypeHints: VariableTypeHint[];
   imports: ImportReference[];
   entryHints: EntryHint[];
@@ -297,7 +438,11 @@ export interface StructureParser {
 export interface SymbolExtractionResult {
   root: string;
   files: FileAnalysis[];
+  namespaces: NamespaceSymbolGraph;
   links: SymbolLink[];
+  referenceEdges: SymbolReferenceEdge[];
+  calls: SymbolCallEdge[];
+  coreSymbols: SymbolCentralityGraph;
   diagnostics: Diagnostic[];
 }
 

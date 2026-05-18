@@ -38,7 +38,8 @@ npm whoami
 - `repolain index <path>` SQLite 索引构建与摘要输出
 - `repolain symbols <path>` 符号提取输出
 - `repolain graph <path>` 文件级依赖图输出，支持 Mermaid
-- `repolain search <path> <query>` 基于路径、文件角色、知识点、symbols、symbol references、symbol links、imports 和 dependency graph 的相关文件搜索
+- `repolain search <path> <query>` 基于路径、文件角色、知识点、symbols、core symbol ranking、namespace graph、scope bindings、symbol references、symbol links、symbol calls、imports 和 dependency graph 的相关文件搜索
+  - 如果检测到本地 SQLite 结构索引版本过旧，会自动回退到临时结构分析
 
 当前结构分析优先尝试 Tree-sitter parser，在不可用或失败时自动回退到 regex parser。npm 全局安装 `repolain` 时默认不会额外安装这些原生 parser 依赖，因此开箱即用行为是稳定的 regex fallback；如果你需要更强的结构分析精度，可以在运行环境里额外安装 `tree-sitter`、`tree-sitter-python`、`tree-sitter-typescript`、`tree-sitter-javascript`、`tree-sitter-c`、`tree-sitter-cpp`。当前支持的结构分析语言包括：
 
@@ -49,11 +50,22 @@ npm whoami
 当前 `symbols` JSON 除了符号定义，也会输出：
 
 - `references`：这个文件里调用/使用了哪些符号
+- `exportBindings`：这个文件对外导出了哪些符号，以及是否来自 re-export
+- `namespaces`：由 nested object export / namespace export 推导出的显式 namespace symbol graph
+- `scopeBindings`：这个文件里当前可见的作用域绑定，例如 import、parameter、variable、implicit this/self
 - `links`：这些引用进一步解析后，指向了哪个内部定义或外部依赖
+- `referenceEdges`：显式的 symbol-to-symbol 引用边，覆盖 call、new、component、type 引用
+- `calls`：基于引用解析出的 symbol-level call edges
+- `coreSymbols`：结合 reference graph、call graph 和 namespace graph 计算出的核心符号排名，可用于 search/index 排序
 
 当前 symbol link 解析会优先利用：
 
 - imports/includes
+- export/re-export 链
+- namespace import 和 `export * as ...` 链
+- `import type`、`export type`、`export { foo as default }`
+- `export =`、`module.exports = Foo`、`module.exports = { default: Foo, named: bar }`、`exports.foo = bar`
+- nested / computed CommonJS 导出，以及 namespace member linking，例如 `module.exports.nested = { createRunner }`、`exports["factory"] = fn`、`ObjectModule.nested.createRunner()`
 - qualifier 上下文
 - 局部变量类型提示，例如 `engine.start()`、`planner.step()`、`foo.run()`
 
@@ -172,7 +184,8 @@ Current release provides:
 - `repolain index <path>` SQLite index builder and summary output
 - `repolain symbols <path>` symbol extraction output
 - `repolain graph <path>` file-level dependency graph output with Mermaid support
-- `repolain search <path> <query>` repository search using paths, file roles, knowledge matches, symbols, symbol references, symbol links, imports, and dependency graph hints
+- `repolain search <path> <query>` repository search using paths, file roles, knowledge matches, symbols, core symbol ranking, namespace graph, scope bindings, symbol references, symbol links, symbol calls, imports, and dependency graph hints
+  - If the persisted SQLite structure index is stale, search automatically falls back to temporary structure analysis.
 
 Structure analysis now prefers Tree-sitter parsers and automatically falls back to regex parsers when Tree-sitter is unavailable or fails. The published npm CLI does not install those native parser packages by default, so the out-of-the-box behavior is stable regex fallback; if you want higher-accuracy native parsing, install `tree-sitter`, `tree-sitter-python`, `tree-sitter-typescript`, `tree-sitter-javascript`, `tree-sitter-c`, and `tree-sitter-cpp` in the runtime environment. Current structure-aware languages:
 
@@ -183,7 +196,24 @@ Structure analysis now prefers Tree-sitter parsers and automatically falls back 
 The `symbols` JSON output now includes:
 
 - `references`, representing which symbols are called or used inside each file
+- `exportBindings`, representing which symbols the file exports and whether they come from a re-export chain
+- `namespaces`, representing an explicit namespace symbol graph derived from nested object exports and namespace exports
+- `scopeBindings`, representing visible scope bindings such as imports, parameters, variables, and implicit `this/self`
 - `links`, representing where those references resolve, such as internal symbol definitions or external dependencies
+- `referenceEdges`, representing explicit symbol-to-symbol reference edges across files
+- `calls`, representing symbol-level call edges derived from resolved references
+- `coreSymbols`, a core-symbol ranking derived from the reference graph, call graph, and namespace graph for search/index ranking
+
+Symbol link resolution now prioritizes:
+
+- imports/includes
+- export/re-export chains
+- namespace imports and `export * as ...` chains
+- `import type`, `export type`, and `export { foo as default }`
+- `export =`, `module.exports = Foo`, `module.exports = { default: Foo, named: bar }`, and `exports.foo = bar`
+- nested/computed CommonJS exports and namespace member linking such as `module.exports.nested = { createRunner }`, `exports["factory"] = fn`, and `ObjectModule.nested.createRunner()`
+- qualifier context
+- local variable type hints such as `engine.start()`, `planner.step()`, and `foo.run()`
 
 ## Usage
 

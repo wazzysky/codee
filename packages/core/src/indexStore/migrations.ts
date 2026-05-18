@@ -207,5 +207,212 @@ export const indexMigrations: IndexMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_symbol_links_source_reference_name ON symbol_links(source_reference_name);
       CREATE INDEX IF NOT EXISTS idx_symbol_links_target_symbol_name ON symbol_links(target_symbol_name);
     `
+  },
+  {
+    version: 6,
+    name: "add-export-bindings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS export_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        exported_name TEXT NOT NULL,
+        local_name TEXT,
+        source_specifier TEXT,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_path, exported_name, local_name, source_specifier, kind, line),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_export_bindings_file_path ON export_bindings(file_path);
+      CREATE INDEX IF NOT EXISTS idx_export_bindings_exported_name ON export_bindings(exported_name);
+      CREATE INDEX IF NOT EXISTS idx_export_bindings_source_specifier ON export_bindings(source_specifier);
+    `
+  },
+  {
+    version: 7,
+    name: "add-scope-bindings-and-symbol-calls",
+    sql: `
+      CREATE TABLE IF NOT EXISTS scope_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        scope_start_line INTEGER NOT NULL,
+        scope_end_line INTEGER NOT NULL,
+        container_name TEXT,
+        type_name TEXT,
+        source_specifier TEXT,
+        imported_name TEXT,
+        symbol_kind TEXT,
+        evidence TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(
+          file_path,
+          name,
+          kind,
+          line,
+          scope_start_line,
+          scope_end_line,
+          container_name,
+          type_name,
+          source_specifier,
+          imported_name,
+          symbol_kind,
+          evidence
+        ),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS symbol_calls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        caller_file_path TEXT NOT NULL,
+        caller_symbol_name TEXT NOT NULL,
+        caller_symbol_kind TEXT NOT NULL,
+        caller_line INTEGER NOT NULL,
+        callee_file_path TEXT,
+        callee_symbol_name TEXT NOT NULL,
+        callee_symbol_kind TEXT,
+        callee_specifier TEXT,
+        reference_kind TEXT NOT NULL,
+        resolution TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        evidence_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(
+          caller_file_path,
+          caller_symbol_name,
+          caller_symbol_kind,
+          caller_line,
+          callee_file_path,
+          callee_symbol_name,
+          callee_specifier,
+          reference_kind,
+          resolution
+        ),
+        FOREIGN KEY(caller_file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scope_bindings_file_path ON scope_bindings(file_path);
+      CREATE INDEX IF NOT EXISTS idx_scope_bindings_name ON scope_bindings(name);
+      CREATE INDEX IF NOT EXISTS idx_symbol_calls_caller_file_path ON symbol_calls(caller_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_calls_callee_file_path ON symbol_calls(callee_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_calls_caller_symbol_name ON symbol_calls(caller_symbol_name);
+      CREATE INDEX IF NOT EXISTS idx_symbol_calls_callee_symbol_name ON symbol_calls(callee_symbol_name);
+    `
+  },
+  {
+    version: 8,
+    name: "add-symbol-reference-edges-and-call-ids",
+    sql: `
+      ALTER TABLE symbol_calls ADD COLUMN caller_symbol_id TEXT;
+      ALTER TABLE symbol_calls ADD COLUMN callee_symbol_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS symbol_reference_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_file_path TEXT NOT NULL,
+        source_symbol_name TEXT NOT NULL,
+        source_symbol_kind TEXT NOT NULL,
+        source_symbol_id TEXT NOT NULL,
+        source_line INTEGER NOT NULL,
+        source_reference_name TEXT NOT NULL,
+        source_reference_kind TEXT NOT NULL,
+        source_qualifier TEXT,
+        target_file_path TEXT,
+        target_symbol_name TEXT,
+        target_symbol_kind TEXT,
+        target_symbol_id TEXT,
+        target_specifier TEXT,
+        resolution TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        evidence_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(
+          source_file_path,
+          source_symbol_id,
+          source_line,
+          source_reference_name,
+          source_reference_kind,
+          target_symbol_id,
+          target_specifier,
+          resolution
+        ),
+        FOREIGN KEY(source_file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_symbol_reference_edges_source_file_path ON symbol_reference_edges(source_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_reference_edges_source_symbol_id ON symbol_reference_edges(source_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_symbol_reference_edges_target_file_path ON symbol_reference_edges(target_file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_reference_edges_target_symbol_id ON symbol_reference_edges(target_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_symbol_reference_edges_source_reference_name ON symbol_reference_edges(source_reference_name);
+    `
+  },
+  {
+    version: 9,
+    name: "add-namespace-symbol-graph",
+    sql: `
+      CREATE TABLE IF NOT EXISTS namespace_symbol_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        path TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        parent_path TEXT,
+        local_name TEXT,
+        source_specifier TEXT,
+        export_kind TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_path, path, kind, line, parent_path, local_name, source_specifier, export_kind),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS namespace_symbol_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        from_path TEXT NOT NULL,
+        to_path TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        target_symbol_name TEXT,
+        target_specifier TEXT,
+        evidence_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_path, from_path, to_path, kind, line, target_symbol_name, target_specifier),
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_namespace_symbol_nodes_file_path ON namespace_symbol_nodes(file_path);
+      CREATE INDEX IF NOT EXISTS idx_namespace_symbol_nodes_path ON namespace_symbol_nodes(path);
+      CREATE INDEX IF NOT EXISTS idx_namespace_symbol_edges_file_path ON namespace_symbol_edges(file_path);
+      CREATE INDEX IF NOT EXISTS idx_namespace_symbol_edges_from_path ON namespace_symbol_edges(from_path);
+      CREATE INDEX IF NOT EXISTS idx_namespace_symbol_edges_to_path ON namespace_symbol_edges(to_path);
+    `
+  },
+  {
+    version: 10,
+    name: "add-symbol-centrality-rankings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS symbol_rankings (
+        symbol_id TEXT PRIMARY KEY,
+        file_path TEXT NOT NULL,
+        symbol_name TEXT NOT NULL,
+        symbol_kind TEXT NOT NULL,
+        score REAL NOT NULL,
+        normalized_score REAL NOT NULL,
+        incoming_reference_count INTEGER NOT NULL,
+        incoming_call_count INTEGER NOT NULL,
+        outgoing_call_count INTEGER NOT NULL,
+        namespace_export_count INTEGER NOT NULL,
+        evidence_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(file_path) REFERENCES files(path) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_symbol_rankings_file_path ON symbol_rankings(file_path);
+      CREATE INDEX IF NOT EXISTS idx_symbol_rankings_symbol_name ON symbol_rankings(symbol_name);
+      CREATE INDEX IF NOT EXISTS idx_symbol_rankings_score ON symbol_rankings(score);
+    `
   }
 ];

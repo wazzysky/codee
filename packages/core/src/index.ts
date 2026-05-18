@@ -1,6 +1,10 @@
 export type { KnowledgePoint } from "@repolain/knowledge-base";
 export { analyzeFileStructure, extractRepositorySymbols } from "./analyzeFileStructure.js";
+export { buildSymbolCentralityGraph } from "./buildSymbolCentralityGraph.js";
 export { buildDependencyGraph } from "./buildDependencyGraph.js";
+export { buildNamespaceSymbolGraph } from "./buildNamespaceSymbolGraph.js";
+export { buildSymbolCallGraph } from "./buildSymbolCallGraph.js";
+export { buildSymbolReferenceGraph } from "./buildSymbolReferenceGraph.js";
 export { buildSymbolLinks } from "./buildSymbolLinks.js";
 export { detectProject } from "./detectProject.js";
 export { detectLanguage } from "./language.js";
@@ -12,8 +16,15 @@ export {
   getFile,
   indexRepository,
   listDependencies,
+  listExportBindings,
   listFiles,
   listKnowledgeMatches,
+  listNamespaceSymbolEdges,
+  listNamespaceSymbolNodes,
+  listScopeBindings,
+  listSymbolCalls,
+  listSymbolRankings,
+  listSymbolReferenceEdges,
   listSymbolLinks,
   listSymbolReferences,
   listSymbols,
@@ -39,6 +50,8 @@ export type {
   EntryHint,
   ExplainFileOptions,
   ExplainMode,
+  ExportBinding,
+  ExportBindingKind,
   FileAnalysis,
   FileSearchResult,
   FileMap,
@@ -56,12 +69,25 @@ export type {
   LlmJsonRequest,
   LlmTextRequest,
   LlmTextResponse,
+  NamespaceSymbolEdge,
+  NamespaceSymbolEdgeKind,
+  NamespaceSymbolGraph,
+  NamespaceSymbolNode,
+  NamespaceSymbolNodeKind,
   ProjectDetection,
   RepoFile,
   ScanOptions,
   ScanResult,
+  ScopeBinding,
+  ScopeBindingKind,
   StructureParseInput,
   StructureParser,
+  SymbolCallEdge,
+  SymbolCallGraph,
+  SymbolCentralityGraph,
+  SymbolCentralityScore,
+  SymbolReferenceEdge,
+  SymbolReferenceGraph,
   SymbolLink,
   SymbolLinkGraph,
   SymbolLinkResolution,

@@ -2,6 +2,7 @@ import path from "node:path";
 import type {
   Diagnostic,
   EntryHint,
+  ExportBinding,
   FileAnalysis,
   ImportBinding,
   StructureParseInput,
@@ -10,6 +11,11 @@ import type {
   SymbolDefinition,
   VariableTypeHint
 } from "../types.js";
+import {
+  parseScriptAssignedSymbolFromText,
+  parseScriptExportArtifactsFromContent,
+  parseScriptExportBindingsFromText
+} from "./exportBindings.js";
 
 interface PythonClassCandidate extends SymbolDefinition {
   indent: number;
@@ -165,6 +171,32 @@ function sortImportBindings(importBindings: ImportBinding[]): ImportBinding[] {
     });
 }
 
+function sortExportBindings(exportBindings: ExportBinding[]): ExportBinding[] {
+  return exportBindings
+    .slice()
+    .sort((left, right) =>
+      left.line === right.line
+        ? `${left.exportedName}:${left.localName ?? ""}:${left.sourceSpecifier ?? ""}`.localeCompare(
+            `${right.exportedName}:${right.localName ?? ""}:${right.sourceSpecifier ?? ""}`
+          )
+        : left.line - right.line
+    )
+    .filter((binding, index, items) => {
+      if (index === 0) {
+        return true;
+      }
+
+      const previous = items[index - 1];
+      return !(
+        previous.line === binding.line &&
+        previous.exportedName === binding.exportedName &&
+        previous.localName === binding.localName &&
+        previous.sourceSpecifier === binding.sourceSpecifier &&
+        previous.kind === binding.kind
+      );
+    });
+}
+
 function sortLocalTypeHints(localTypeHints: VariableTypeHint[]): VariableTypeHint[] {
   return localTypeHints
     .slice()
@@ -228,6 +260,7 @@ function parsePython(input: StructureParseInput): FileAnalysis {
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const exportBindings: ExportBinding[] = [];
   const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
@@ -386,6 +419,8 @@ function parsePython(input: StructureParseInput): FileAnalysis {
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    exportBindings: sortExportBindings(exportBindings),
+    scopeBindings: [],
     localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line
@@ -403,6 +438,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const exportBindings: ExportBinding[] = [];
   const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
@@ -418,6 +454,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
 
     const importMatch =
       /^\s*import\s+.+?\s+from\s+["']([^"']+)["']/u.exec(line) ??
+      /^\s*import\s+[A-Za-z_]\w*\s*=\s*require\(\s*["']([^"']+)["']\s*\)/u.exec(line) ??
       /^\s*import\s+["']([^"']+)["']/u.exec(line) ??
       /require\(\s*["']([^"']+)["']\s*\)/u.exec(line);
     if (importMatch) {
@@ -433,8 +470,19 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
         evidence: [`regex: ${trimmed}`]
       });
 
+      const importEqualsMatch = /^\s*import\s+([A-Za-z_]\w*)\s*=\s*require\(\s*["'][^"']+["']\s*\)/u.exec(line);
+      if (importEqualsMatch) {
+        importBindings.push({
+          localName: importEqualsMatch[1],
+          importedName: "default",
+          sourceSpecifier: specifier,
+          kind: "default",
+          line: index + 1
+        });
+      }
+
       const clauseMatch = /^\s*import\s+(.+?)\s+from\s+["'][^"']+["']/u.exec(line);
-      const clause = clauseMatch?.[1]?.trim();
+      const clause = clauseMatch?.[1]?.trim().replace(/^type\s+/u, "");
       if (clause) {
         const namespaceMatch = /^\*\s+as\s+([A-Za-z_]\w*)$/u.exec(clause);
         if (namespaceMatch) {
@@ -460,7 +508,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
           const namedPart = (namedPartRaw ?? (defaultPart?.startsWith("{") ? defaultPart : undefined))?.trim();
           if (namedPart?.startsWith("{") && namedPart.endsWith("}")) {
             for (const member of namedPart.slice(1, -1).split(",")) {
-              const trimmedMember = member.trim();
+              const trimmedMember = member.trim().replace(/^type\s+/u, "");
               if (trimmedMember.length === 0) {
                 continue;
               }
@@ -483,6 +531,18 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
       }
     }
 
+    exportBindings.push(...parseScriptExportBindingsFromText(trimmed, index + 1));
+    const assignedSymbol = parseScriptAssignedSymbolFromText(trimmed);
+    if (assignedSymbol) {
+      symbols.push({
+        name: assignedSymbol.name,
+        kind: assignedSymbol.kind,
+        startLine: index + 1,
+        endLine: findBraceBlockEnd(lines, index),
+        signature: assignedSymbol.signature
+      });
+    }
+
     const classMatch = /^\s*(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_]\w*)\b/u.exec(line);
     if (classMatch) {
       const classSymbol: SymbolDefinition = {
@@ -493,6 +553,20 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
       };
       classRanges.push(classSymbol);
       symbols.push(classSymbol);
+      continue;
+    }
+
+    const typeMatch =
+      /^\s*(?:export\s+)?interface\s+([A-Za-z_]\w*)\b/u.exec(line) ??
+      /^\s*(?:export\s+)?type\s+([A-Za-z_]\w*)\b/u.exec(line);
+    if (typeMatch) {
+      symbols.push({
+        name: typeMatch[1],
+        kind: "type",
+        startLine: index + 1,
+        endLine: findBraceBlockEnd(lines, index),
+        signature: trimmed
+      });
       continue;
     }
 
@@ -552,7 +626,7 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
     for (const match of trimmed.matchAll(/\bnew\s+([A-Za-z_]\w*)\s*\(/gu)) {
       addReference(references, match[1], "new", index + 1, `regex: ${trimmed}`, activeContainer?.name);
     }
-    for (const match of trimmed.matchAll(/\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/gu)) {
+    for (const match of trimmed.matchAll(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)\s*\(/gu)) {
       addReference(
         references,
         match[2],
@@ -621,6 +695,18 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
     });
   }
 
+  const parsedArtifacts = parseScriptExportArtifactsFromContent(input.content);
+  exportBindings.push(...parsedArtifacts.bindings);
+  for (const assignedSymbol of parsedArtifacts.assignedSymbols) {
+    symbols.push({
+      name: assignedSymbol.name,
+      kind: assignedSymbol.kind,
+      startLine: assignedSymbol.line,
+      endLine: assignedSymbol.line,
+      signature: assignedSymbol.signature
+    });
+  }
+
   return {
     filePath,
     language,
@@ -628,6 +714,8 @@ function parseTypeScriptLike(input: StructureParseInput, language: "TypeScript" 
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    exportBindings: sortExportBindings(exportBindings),
+    scopeBindings: [],
     localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line
@@ -645,6 +733,7 @@ function parseCppLike(input: StructureParseInput, language: "C" | "C++"): FileAn
   const symbols: SymbolDefinition[] = [];
   const references: SymbolReference[] = [];
   const importBindings: ImportBinding[] = [];
+  const exportBindings: ExportBinding[] = [];
   const localTypeHints: VariableTypeHint[] = [];
   const imports: FileAnalysis["imports"] = [];
   const entryHints: EntryHint[] = [];
@@ -791,6 +880,8 @@ function parseCppLike(input: StructureParseInput, language: "C" | "C++"): FileAn
     symbols: sortSymbols(symbols),
     references: sortReferences(references),
     importBindings: sortImportBindings(importBindings),
+    exportBindings: sortExportBindings(exportBindings),
+    scopeBindings: [],
     localTypeHints: sortLocalTypeHints(localTypeHints),
     imports: imports.sort((left, right) =>
       left.line === right.line ? left.specifier.localeCompare(right.specifier) : left.line - right.line

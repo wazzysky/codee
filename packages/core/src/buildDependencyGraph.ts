@@ -208,6 +208,38 @@ export function buildDependencyGraph(root: string, analyses: FileAnalysis[]): De
         evidence: resolved.evidence
       });
     }
+
+    const exportDependencyKeys = new Set<string>();
+    for (const exportBinding of analysis.exportBindings) {
+      if (!exportBinding.sourceSpecifier) {
+        continue;
+      }
+
+      const edgeKey = `${exportBinding.line}\u0000${exportBinding.sourceSpecifier}`;
+      if (exportDependencyKeys.has(edgeKey)) {
+        continue;
+      }
+      exportDependencyKeys.add(edgeKey);
+
+      const resolved = resolveDependency(analysis, exportBinding.sourceSpecifier, fileSet);
+      edges.push({
+        sourcePath: normalizePath(analysis.filePath),
+        targetPath: resolved.targetPath,
+        specifier: exportBinding.sourceSpecifier,
+        kind: "import",
+        line: exportBinding.line,
+        resolution: resolved.resolution,
+        from: normalizePath(analysis.filePath),
+        to: resolved.targetPath,
+        type: "import",
+        resolved: resolved.resolution === "internal",
+        confidence: Math.max(resolved.confidence, 0.88),
+        evidence: [
+          `Resolved re-export dependency "${exportBinding.sourceSpecifier}" from export binding.`,
+          ...resolved.evidence
+        ]
+      });
+    }
   }
 
   edges.sort((left, right) => {

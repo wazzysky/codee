@@ -29,6 +29,13 @@ describe("buildDependencyGraph", () => {
           resolved: true
         }),
         expect.objectContaining({
+          sourcePath: "ts/ui/index.ts",
+          targetPath: "ts/ui/panel.tsx",
+          specifier: "./panel",
+          resolution: "internal",
+          resolved: true
+        }),
+        expect.objectContaining({
           sourcePath: "cpp/main.cpp",
           targetPath: "cpp/local.hpp",
           specifier: "local.hpp",

@@ -13,16 +13,23 @@ import { matchKnowledge } from "./matchKnowledge.js";
 import { scanRepository } from "./scanRepository.js";
 import type {
   DependencyGraphEdge,
+  ExportBinding,
   FileSearchResult,
   FileAnalysis,
   FileMapFile,
   IndexedFileRecord,
   IndexSummary,
   KnowledgeMatch,
+  NamespaceSymbolEdge,
+  NamespaceSymbolNode,
   ProjectDetection,
   RepoFile,
   ScanResult,
+  ScopeBinding,
+  SymbolCallEdge,
+  SymbolCentralityScore,
   SymbolLink,
+  SymbolReferenceEdge,
   SymbolReference,
   SymbolDefinition
 } from "./types.js";
@@ -55,6 +62,10 @@ const searchResultSchema = z.object({
   matchedSymbols: z.array(z.string()),
   matchedKnowledge: z.array(z.string()),
   matchedImports: z.array(z.string()),
+  matchedCoreSymbols: z.array(z.string()),
+  matchedNamespaces: z.array(z.string()),
+  matchedExports: z.array(z.string()),
+  matchedCalls: z.array(z.string()),
   dependencyHints: z.array(z.string()),
   matchedReferences: z.array(z.string()),
   matchedLinks: z.array(z.string())
@@ -63,7 +74,7 @@ const searchResultSchema = z.object({
 const storedSymbolSchema = z.object({
   filePath: z.string(),
   name: z.string(),
-  kind: z.enum(["function", "class", "method", "component"]),
+  kind: z.enum(["function", "class", "method", "component", "type"]),
   startLine: z.number(),
   endLine: z.number(),
   containerName: z.string().optional(),
@@ -82,12 +93,36 @@ const storedDependencySchema = z.object({
   evidence: z.array(z.string())
 });
 
+const storedExportBindingSchema = z.object({
+  filePath: z.string(),
+  exportedName: z.string(),
+  localName: z.string().optional(),
+  sourceSpecifier: z.string().optional(),
+  kind: z.enum(["default", "named", "all", "namespace"]),
+  line: z.number()
+});
+
 const storedReferenceSchema = z.object({
   filePath: z.string(),
   name: z.string(),
   kind: z.enum(["call", "new", "component", "type"]),
   line: z.number(),
   containerName: z.string().optional(),
+  evidence: z.string()
+});
+
+const storedScopeBindingSchema = z.object({
+  filePath: z.string(),
+  name: z.string(),
+  kind: z.enum(["symbol", "import", "module", "parameter", "variable", "implicit-this", "implicit-self"]),
+  line: z.number(),
+  scopeStartLine: z.number(),
+  scopeEndLine: z.number(),
+  containerName: z.string().optional(),
+  typeName: z.string().optional(),
+  sourceSpecifier: z.string().optional(),
+  importedName: z.string().optional(),
+  symbolKind: z.enum(["function", "class", "method", "component", "type"]).optional(),
   evidence: z.string()
 });
 
@@ -99,12 +134,86 @@ const storedLinkSchema = z.object({
   sourceQualifier: z.string().optional(),
   targetFilePath: z.string().optional(),
   targetSymbolName: z.string().optional(),
-  targetSymbolKind: z.enum(["function", "class", "method", "component"]).optional(),
+  targetSymbolKind: z.enum(["function", "class", "method", "component", "type"]).optional(),
   targetSpecifier: z.string().optional(),
   resolution: z.enum(["local", "internal", "external", "global", "unresolved"]),
   confidence: z.number(),
   evidence: z.array(z.string())
 });
+
+const storedCallSchema = z.object({
+  callerFilePath: z.string(),
+  callerSymbolName: z.string(),
+  callerSymbolKind: z.enum(["function", "class", "method", "component", "type"]),
+  callerSymbolId: z.string(),
+  callerLine: z.number(),
+  calleeFilePath: z.string().optional(),
+  calleeSymbolName: z.string(),
+  calleeSymbolKind: z.enum(["function", "class", "method", "component", "type"]).optional(),
+  calleeSymbolId: z.string().optional(),
+  calleeSpecifier: z.string().optional(),
+  referenceKind: z.enum(["call", "new", "component"]),
+  resolution: z.enum(["local", "internal", "external", "global", "unresolved"]),
+  confidence: z.number(),
+  evidence: z.array(z.string())
+});
+
+const storedReferenceEdgeSchema = z.object({
+  sourceFilePath: z.string(),
+  sourceSymbolName: z.string(),
+  sourceSymbolKind: z.enum(["function", "class", "method", "component", "type"]),
+  sourceSymbolId: z.string(),
+  sourceLine: z.number(),
+  sourceReferenceName: z.string(),
+  sourceReferenceKind: z.enum(["call", "new", "component", "type"]),
+  sourceQualifier: z.string().optional(),
+  targetFilePath: z.string().optional(),
+  targetSymbolName: z.string().optional(),
+  targetSymbolKind: z.enum(["function", "class", "method", "component", "type"]).optional(),
+  targetSymbolId: z.string().optional(),
+  targetSpecifier: z.string().optional(),
+  resolution: z.enum(["local", "internal", "external", "global", "unresolved"]),
+  confidence: z.number(),
+  evidence: z.array(z.string())
+});
+
+const storedNamespaceNodeSchema = z.object({
+  filePath: z.string(),
+  path: z.string(),
+  kind: z.enum(["namespace", "export"]),
+  line: z.number(),
+  parentPath: z.string().optional(),
+  localName: z.string().optional(),
+  sourceSpecifier: z.string().optional(),
+  exportKind: z.enum(["default", "named", "all", "namespace"]).optional()
+});
+
+const storedNamespaceEdgeSchema = z.object({
+  filePath: z.string(),
+  fromPath: z.string(),
+  toPath: z.string(),
+  kind: z.enum(["contains", "resolves-to"]),
+  line: z.number(),
+  targetSymbolName: z.string().optional(),
+  targetSpecifier: z.string().optional(),
+  evidence: z.array(z.string())
+});
+
+const storedSymbolRankingSchema = z.object({
+  symbolId: z.string(),
+  filePath: z.string(),
+  symbolName: z.string(),
+  symbolKind: z.enum(["function", "class", "method", "component", "type"]),
+  score: z.number(),
+  normalizedScore: z.number(),
+  incomingReferenceCount: z.number(),
+  incomingCallCount: z.number(),
+  outgoingCallCount: z.number(),
+  namespaceExportCount: z.number(),
+  evidence: z.array(z.string())
+});
+
+const STRUCTURE_INDEX_VERSION = "6";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -136,9 +245,16 @@ function buildSearchText(
   fileRole: FileMapFile | undefined,
   knowledgeMatches: KnowledgeMatch[],
   symbols: SymbolDefinition[],
+  symbolRankings: SymbolCentralityScore[],
+  namespaceNodes: NamespaceSymbolNode[],
+  namespaceEdges: NamespaceSymbolEdge[],
+  exportBindings: ExportBinding[],
+  scopeBindings: ScopeBinding[],
   dependencies: DependencyGraphEdge[],
   references: SymbolReference[],
-  links: SymbolLink[]
+  referenceEdges: SymbolReferenceEdge[],
+  links: SymbolLink[],
+  calls: SymbolCallEdge[]
 ): string {
   const parts = [
     file.path,
@@ -147,7 +263,47 @@ function buildSearchText(
     fileRole?.explanation ?? "",
     ...knowledgeMatches.flatMap((match) => [match.name, match.domain, ...match.evidence]),
     ...symbols.flatMap((symbol) => [symbol.name, symbol.kind, symbol.containerName ?? "", symbol.signature ?? ""]),
+    ...symbolRankings.flatMap((ranking) => [ranking.symbolName, ranking.symbolKind, ...ranking.evidence]),
+    ...namespaceNodes.flatMap((node) => [
+      node.path,
+      node.kind,
+      node.parentPath ?? "",
+      node.localName ?? "",
+      node.sourceSpecifier ?? "",
+      node.exportKind ?? ""
+    ]),
+    ...namespaceEdges.flatMap((edge) => [
+      edge.fromPath,
+      edge.toPath,
+      edge.kind,
+      edge.targetSymbolName ?? "",
+      edge.targetSpecifier ?? "",
+      ...edge.evidence
+    ]),
+    ...exportBindings.flatMap((binding) => [
+      binding.exportedName,
+      binding.localName ?? "",
+      binding.sourceSpecifier ?? "",
+      binding.kind
+    ]),
+    ...scopeBindings.flatMap((binding) => [
+      binding.name,
+      binding.kind,
+      binding.typeName ?? "",
+      binding.sourceSpecifier ?? "",
+      binding.importedName ?? "",
+      binding.symbolKind ?? ""
+    ]),
     ...references.flatMap((reference) => [reference.name, reference.kind, reference.containerName ?? "", reference.evidence]),
+    ...referenceEdges.flatMap((edge) => [
+      edge.sourceSymbolName,
+      edge.sourceReferenceName,
+      edge.targetSymbolName ?? "",
+      edge.targetFilePath ?? "",
+      edge.targetSpecifier ?? "",
+      edge.sourceReferenceKind,
+      edge.resolution
+    ]),
     ...dependencies.flatMap((dependency) => [dependency.specifier, dependency.targetPath ?? "", dependency.resolution]),
     ...links.flatMap((link) => [
       link.sourceReferenceName,
@@ -156,6 +312,15 @@ function buildSearchText(
       link.targetSpecifier ?? "",
       link.resolution,
       ...link.evidence
+    ]),
+    ...calls.flatMap((call) => [
+      call.callerSymbolName,
+      call.calleeSymbolName,
+      call.calleeFilePath ?? "",
+      call.calleeSpecifier ?? "",
+      call.referenceKind,
+      call.resolution,
+      ...call.evidence
     ])
   ];
 
@@ -216,6 +381,10 @@ function mapSearchResult(row: SqliteRow): FileSearchResult {
     matchedSymbols: parseJsonArray(row.matched_symbols_json ?? row.symbol_names_json),
     matchedKnowledge: parseJsonArray(row.matched_knowledge_json ?? row.knowledge_names_json),
     matchedImports: parseJsonArray(row.matched_imports_json ?? row.import_specifiers_json),
+    matchedCoreSymbols: parseJsonArray(row.matched_core_symbols_json),
+    matchedNamespaces: parseJsonArray(row.matched_namespaces_json),
+    matchedExports: parseJsonArray(row.matched_exports_json),
+    matchedCalls: parseJsonArray(row.matched_calls_json),
     dependencyHints: parseJsonArray(row.dependency_hints_json),
     matchedReferences: parseJsonArray(row.matched_references_json),
     matchedLinks: parseJsonArray(row.matched_links_json)
@@ -257,6 +426,19 @@ function mapStoredDependency(row: SqliteRow): DependencyGraphEdge & { isInternal
   };
 }
 
+function mapStoredExportBinding(row: SqliteRow): ExportBinding & { filePath: string } {
+  return storedExportBindingSchema.parse({
+    filePath: String(row.file_path),
+    exportedName: String(row.exported_name),
+    localName:
+      row.local_name === null || row.local_name === undefined ? undefined : String(row.local_name),
+    sourceSpecifier:
+      row.source_specifier === null || row.source_specifier === undefined ? undefined : String(row.source_specifier),
+    kind: String(row.kind),
+    line: Number(row.line)
+  });
+}
+
 function mapStoredReference(row: SqliteRow): SymbolReference & { filePath: string } {
   return storedReferenceSchema.parse({
     filePath: String(row.file_path),
@@ -265,6 +447,27 @@ function mapStoredReference(row: SqliteRow): SymbolReference & { filePath: strin
     line: Number(row.line),
     containerName:
       row.container_name === null || row.container_name === undefined ? undefined : String(row.container_name),
+    evidence: String(row.evidence)
+  });
+}
+
+function mapStoredScopeBinding(row: SqliteRow): ScopeBinding & { filePath: string } {
+  return storedScopeBindingSchema.parse({
+    filePath: String(row.file_path),
+    name: String(row.name),
+    kind: String(row.kind),
+    line: Number(row.line),
+    scopeStartLine: Number(row.scope_start_line),
+    scopeEndLine: Number(row.scope_end_line),
+    containerName:
+      row.container_name === null || row.container_name === undefined ? undefined : String(row.container_name),
+    typeName: row.type_name === null || row.type_name === undefined ? undefined : String(row.type_name),
+    sourceSpecifier:
+      row.source_specifier === null || row.source_specifier === undefined ? undefined : String(row.source_specifier),
+    importedName:
+      row.imported_name === null || row.imported_name === undefined ? undefined : String(row.imported_name),
+    symbolKind:
+      row.symbol_kind === null || row.symbol_kind === undefined ? undefined : String(row.symbol_kind),
     evidence: String(row.evidence)
   });
 }
@@ -291,6 +494,109 @@ function mapStoredLink(row: SqliteRow): SymbolLink {
       row.target_specifier === null || row.target_specifier === undefined ? undefined : String(row.target_specifier),
     resolution: String(row.resolution),
     confidence: Number(row.confidence),
+    evidence: parseJsonArray(row.evidence_json)
+  });
+}
+
+function mapStoredCall(row: SqliteRow): SymbolCallEdge {
+  return storedCallSchema.parse({
+    callerFilePath: String(row.caller_file_path),
+    callerSymbolName: String(row.caller_symbol_name),
+    callerSymbolKind: String(row.caller_symbol_kind),
+    callerSymbolId: String(row.caller_symbol_id),
+    callerLine: Number(row.caller_line),
+    calleeFilePath:
+      row.callee_file_path === null || row.callee_file_path === undefined ? undefined : String(row.callee_file_path),
+    calleeSymbolName: String(row.callee_symbol_name),
+    calleeSymbolKind:
+      row.callee_symbol_kind === null || row.callee_symbol_kind === undefined
+        ? undefined
+        : String(row.callee_symbol_kind),
+    calleeSymbolId:
+      row.callee_symbol_id === null || row.callee_symbol_id === undefined ? undefined : String(row.callee_symbol_id),
+    calleeSpecifier:
+      row.callee_specifier === null || row.callee_specifier === undefined ? undefined : String(row.callee_specifier),
+    referenceKind: String(row.reference_kind),
+    resolution: String(row.resolution),
+    confidence: Number(row.confidence),
+    evidence: parseJsonArray(row.evidence_json)
+  });
+}
+
+function mapStoredReferenceEdge(row: SqliteRow): SymbolReferenceEdge {
+  return storedReferenceEdgeSchema.parse({
+    sourceFilePath: String(row.source_file_path),
+    sourceSymbolName: String(row.source_symbol_name),
+    sourceSymbolKind: String(row.source_symbol_kind),
+    sourceSymbolId: String(row.source_symbol_id),
+    sourceLine: Number(row.source_line),
+    sourceReferenceName: String(row.source_reference_name),
+    sourceReferenceKind: String(row.source_reference_kind),
+    sourceQualifier:
+      row.source_qualifier === null || row.source_qualifier === undefined ? undefined : String(row.source_qualifier),
+    targetFilePath:
+      row.target_file_path === null || row.target_file_path === undefined ? undefined : String(row.target_file_path),
+    targetSymbolName:
+      row.target_symbol_name === null || row.target_symbol_name === undefined
+        ? undefined
+        : String(row.target_symbol_name),
+    targetSymbolKind:
+      row.target_symbol_kind === null || row.target_symbol_kind === undefined
+        ? undefined
+        : String(row.target_symbol_kind),
+    targetSymbolId:
+      row.target_symbol_id === null || row.target_symbol_id === undefined ? undefined : String(row.target_symbol_id),
+    targetSpecifier:
+      row.target_specifier === null || row.target_specifier === undefined ? undefined : String(row.target_specifier),
+    resolution: String(row.resolution),
+    confidence: Number(row.confidence),
+    evidence: parseJsonArray(row.evidence_json)
+  });
+}
+
+function mapStoredNamespaceNode(row: SqliteRow): NamespaceSymbolNode {
+  return storedNamespaceNodeSchema.parse({
+    filePath: String(row.file_path),
+    path: String(row.path),
+    kind: String(row.kind),
+    line: Number(row.line),
+    parentPath: row.parent_path === null || row.parent_path === undefined ? undefined : String(row.parent_path),
+    localName: row.local_name === null || row.local_name === undefined ? undefined : String(row.local_name),
+    sourceSpecifier:
+      row.source_specifier === null || row.source_specifier === undefined ? undefined : String(row.source_specifier),
+    exportKind: row.export_kind === null || row.export_kind === undefined ? undefined : String(row.export_kind)
+  });
+}
+
+function mapStoredNamespaceEdge(row: SqliteRow): NamespaceSymbolEdge {
+  return storedNamespaceEdgeSchema.parse({
+    filePath: String(row.file_path),
+    fromPath: String(row.from_path),
+    toPath: String(row.to_path),
+    kind: String(row.kind),
+    line: Number(row.line),
+    targetSymbolName:
+      row.target_symbol_name === null || row.target_symbol_name === undefined
+        ? undefined
+        : String(row.target_symbol_name),
+    targetSpecifier:
+      row.target_specifier === null || row.target_specifier === undefined ? undefined : String(row.target_specifier),
+    evidence: parseJsonArray(row.evidence_json)
+  });
+}
+
+function mapStoredSymbolRanking(row: SqliteRow): SymbolCentralityScore {
+  return storedSymbolRankingSchema.parse({
+    symbolId: String(row.symbol_id),
+    filePath: String(row.file_path),
+    symbolName: String(row.symbol_name),
+    symbolKind: String(row.symbol_kind),
+    score: Number(row.score),
+    normalizedScore: Number(row.normalized_score),
+    incomingReferenceCount: Number(row.incoming_reference_count),
+    incomingCallCount: Number(row.incoming_call_count),
+    outgoingCallCount: Number(row.outgoing_call_count),
+    namespaceExportCount: Number(row.namespace_export_count),
     evidence: parseJsonArray(row.evidence_json)
   });
 }
@@ -412,6 +718,11 @@ export class SQLiteIndexStore {
     return rows[0] ? mapStoredFile(rows[0]) : undefined;
   }
 
+  public async isStructureIndexCurrent(): Promise<boolean> {
+    const currentVersion = await this.getMetadataValue("structure_index_version");
+    return currentVersion === STRUCTURE_INDEX_VERSION;
+  }
+
   public async searchFiles(query: string): Promise<FileSearchResult[]> {
     await this.ensureReady();
     const normalizedQuery = query.trim().toLowerCase();
@@ -445,13 +756,28 @@ export class SQLiteIndexStore {
     );
 
     const allSymbols = await this.listSymbols();
+    const allSymbolRankings = await this.listSymbolRankings();
+    const allNamespaceNodes = await this.listNamespaceSymbolNodes();
+    const allNamespaceEdges = await this.listNamespaceSymbolEdges();
+    const allExportBindings = await this.listExportBindings();
     const allReferences = await this.listSymbolReferences();
+    const allScopeBindings = await this.listScopeBindings();
     const allLinks = await this.listSymbolLinks();
+    const allReferenceEdges = await this.listSymbolReferenceEdges();
+    const allCalls = await this.listSymbolCalls();
     const allDependencies = await this.listDependencies();
     const allKnowledgeMatches = await this.listKnowledgeMatches();
     const symbolsByPath = new Map<string, SymbolDefinition[]>();
+    const symbolRankingsByPath = new Map<string, SymbolCentralityScore[]>();
+    const namespaceNodesByPath = new Map<string, NamespaceSymbolNode[]>();
+    const namespaceEdgesByPath = new Map<string, NamespaceSymbolEdge[]>();
+    const exportBindingsByPath = new Map<string, ExportBinding[]>();
     const referencesByPath = new Map<string, SymbolReference[]>();
+    const scopeBindingsByPath = new Map<string, ScopeBinding[]>();
     const linksByPath = new Map<string, SymbolLink[]>();
+    const outgoingReferenceEdgesByPath = new Map<string, SymbolReferenceEdge[]>();
+    const incomingReferenceEdgesByPath = new Map<string, SymbolReferenceEdge[]>();
+    const callsByPath = new Map<string, SymbolCallEdge[]>();
     const dependenciesByPath = new Map<string, DependencyGraphEdge[]>();
     const knowledgeByPath = new Map<string, KnowledgeMatch[]>();
     for (const symbol of allSymbols) {
@@ -460,16 +786,63 @@ export class SQLiteIndexStore {
       symbolsByPath.set(symbol.filePath, bucket);
     }
 
+    for (const ranking of allSymbolRankings) {
+      const bucket = symbolRankingsByPath.get(ranking.filePath) ?? [];
+      bucket.push(ranking);
+      symbolRankingsByPath.set(ranking.filePath, bucket);
+    }
+
+    for (const node of allNamespaceNodes) {
+      const bucket = namespaceNodesByPath.get(node.filePath) ?? [];
+      bucket.push(node);
+      namespaceNodesByPath.set(node.filePath, bucket);
+    }
+
+    for (const edge of allNamespaceEdges) {
+      const bucket = namespaceEdgesByPath.get(edge.filePath) ?? [];
+      bucket.push(edge);
+      namespaceEdgesByPath.set(edge.filePath, bucket);
+    }
+
+    for (const exportBinding of allExportBindings) {
+      const bucket = exportBindingsByPath.get(exportBinding.filePath) ?? [];
+      bucket.push(exportBinding);
+      exportBindingsByPath.set(exportBinding.filePath, bucket);
+    }
+
     for (const reference of allReferences) {
       const bucket = referencesByPath.get(reference.filePath) ?? [];
       bucket.push(reference);
       referencesByPath.set(reference.filePath, bucket);
     }
 
+    for (const scopeBinding of allScopeBindings) {
+      const bucket = scopeBindingsByPath.get(scopeBinding.filePath) ?? [];
+      bucket.push(scopeBinding);
+      scopeBindingsByPath.set(scopeBinding.filePath, bucket);
+    }
+
     for (const link of allLinks) {
       const bucket = linksByPath.get(link.sourceFilePath) ?? [];
       bucket.push(link);
       linksByPath.set(link.sourceFilePath, bucket);
+    }
+
+    for (const edge of allReferenceEdges) {
+      const outgoing = outgoingReferenceEdgesByPath.get(edge.sourceFilePath) ?? [];
+      outgoing.push(edge);
+      outgoingReferenceEdgesByPath.set(edge.sourceFilePath, outgoing);
+      if (edge.targetFilePath) {
+        const incoming = incomingReferenceEdgesByPath.get(edge.targetFilePath) ?? [];
+        incoming.push(edge);
+        incomingReferenceEdgesByPath.set(edge.targetFilePath, incoming);
+      }
+    }
+
+    for (const call of allCalls) {
+      const bucket = callsByPath.get(call.callerFilePath) ?? [];
+      bucket.push(call);
+      callsByPath.set(call.callerFilePath, bucket);
     }
 
     for (const dependency of allDependencies) {
@@ -496,9 +869,55 @@ export class SQLiteIndexStore {
         .map((symbol) => symbol.kind)
         .filter((kind) => tokens.some((token) => kind.toLowerCase().includes(token)))
       );
+      const matchedCoreSymbols = uniqueSorted((symbolRankingsByPath.get(filePath) ?? [])
+        .filter((ranking) =>
+          [ranking.symbolName, ranking.symbolKind, ...ranking.evidence].some((value) =>
+            value.length > 0 && tokens.some((token) => value.toLowerCase().includes(token))
+          )
+        )
+        .map((ranking) => ranking.symbolName)
+      );
+      const matchedNamespaces = uniqueSorted([
+        ...(namespaceNodesByPath.get(filePath) ?? []).flatMap((node) => [
+          node.path,
+          node.kind,
+          node.parentPath ?? "",
+          node.localName ?? "",
+          node.sourceSpecifier ?? "",
+          node.exportKind ?? ""
+        ]),
+        ...(namespaceEdgesByPath.get(filePath) ?? []).flatMap((edge) => [
+          edge.fromPath,
+          edge.toPath,
+          edge.kind,
+          edge.targetSymbolName ?? "",
+          edge.targetSpecifier ?? "",
+          ...edge.evidence
+        ])
+      ]
+        .filter((value) => value.length > 0)
+        .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
+      );
+      const matchedExports = uniqueSorted((exportBindingsByPath.get(filePath) ?? [])
+        .flatMap((binding) => [binding.exportedName, binding.localName ?? "", binding.sourceSpecifier ?? "", binding.kind])
+        .filter((value) => value.length > 0)
+        .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
+      );
       const matchedReferences = uniqueSorted((referencesByPath.get(filePath) ?? [])
         .map((reference) => reference.name)
         .filter((name) => tokens.some((token) => name.toLowerCase().includes(token)))
+      );
+      const matchedScopeBindings = uniqueSorted((scopeBindingsByPath.get(filePath) ?? [])
+        .flatMap((binding) => [
+          binding.name,
+          binding.kind,
+          binding.typeName ?? "",
+          binding.sourceSpecifier ?? "",
+          binding.importedName ?? "",
+          binding.symbolKind ?? ""
+        ])
+        .filter((value) => value.length > 0)
+        .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
       );
       const matchedLinks = uniqueSorted((linksByPath.get(filePath) ?? [])
         .flatMap((link) => [
@@ -508,6 +927,35 @@ export class SQLiteIndexStore {
           link.targetSpecifier ?? "",
           link.resolution,
           ...link.evidence
+        ])
+        .filter((value) => value.length > 0)
+        .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
+      );
+      const matchedCalls = uniqueSorted((callsByPath.get(filePath) ?? [])
+        .flatMap((call) => [
+          call.callerSymbolName,
+          call.calleeSymbolName,
+          call.calleeFilePath ?? "",
+          call.calleeSpecifier ?? "",
+          call.referenceKind,
+          call.resolution,
+          ...call.evidence
+        ])
+        .filter((value) => value.length > 0)
+        .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
+      );
+      const matchedUsageHints = uniqueSorted([
+        ...(outgoingReferenceEdgesByPath.get(filePath) ?? []),
+        ...(incomingReferenceEdgesByPath.get(filePath) ?? [])
+      ]
+        .flatMap((edge) => [
+          edge.sourceSymbolName,
+          edge.sourceReferenceName,
+          edge.targetSymbolName ?? "",
+          edge.targetFilePath ?? "",
+          edge.targetSpecifier ?? "",
+          edge.sourceReferenceKind,
+          edge.resolution
         ])
         .filter((value) => value.length > 0)
         .filter((value) => tokens.some((token) => value.toLowerCase().includes(token)))
@@ -572,14 +1020,44 @@ export class SQLiteIndexStore {
         score += symbolKinds.length * 10;
       }
 
+      if (matchedCoreSymbols.length > 0) {
+        reasons.push(`core symbols matched: ${matchedCoreSymbols.join(", ")}`);
+        score += matchedCoreSymbols.length * 18;
+      }
+
+      if (matchedNamespaces.length > 0) {
+        reasons.push(`namespace graph matched: ${matchedNamespaces.join(", ")}`);
+        score += matchedNamespaces.length * 13;
+      }
+
       if (matchedReferences.length > 0) {
         reasons.push(`symbol references matched: ${matchedReferences.join(", ")}`);
         score += matchedReferences.length * 12;
       }
 
+      if (matchedScopeBindings.length > 0) {
+        reasons.push(`scope bindings matched: ${matchedScopeBindings.join(", ")}`);
+        score += matchedScopeBindings.length * 8;
+      }
+
+      if (matchedExports.length > 0) {
+        reasons.push(`exports matched: ${matchedExports.join(", ")}`);
+        score += matchedExports.length * 12;
+      }
+
       if (matchedLinks.length > 0) {
         reasons.push(`symbol links matched: ${matchedLinks.join(", ")}`);
         score += matchedLinks.length * 14;
+      }
+
+      if (matchedCalls.length > 0) {
+        reasons.push(`symbol calls matched: ${matchedCalls.join(", ")}`);
+        score += matchedCalls.length * 16;
+      }
+
+      if (matchedUsageHints.length > 0) {
+        reasons.push(`usage graph matched: ${matchedUsageHints.join(", ")}`);
+        score += matchedUsageHints.length * 14;
       }
 
       if (importSpecifiers.length > 0) {
@@ -606,6 +1084,10 @@ export class SQLiteIndexStore {
         matched_symbols_json: jsonValue(symbolNames),
         matched_knowledge_json: jsonValue(knowledgeNames),
         matched_imports_json: jsonValue(importSpecifiers),
+        matched_core_symbols_json: jsonValue(matchedCoreSymbols),
+        matched_namespaces_json: jsonValue(matchedNamespaces),
+        matched_exports_json: jsonValue(matchedExports),
+        matched_calls_json: jsonValue(matchedCalls),
         dependency_hints_json: jsonValue(dependencyHints),
         matched_references_json: jsonValue(matchedReferences),
         matched_links_json: jsonValue(matchedLinks)
@@ -673,6 +1155,103 @@ export class SQLiteIndexStore {
     return rows.map(mapStoredSymbol);
   }
 
+  public async listExportBindings(filePath?: string): Promise<Array<ExportBinding & { filePath: string }>> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE eb.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          eb.file_path,
+          eb.exported_name,
+          eb.local_name,
+          eb.source_specifier,
+          eb.kind,
+          eb.line
+        FROM export_bindings eb
+        ${whereClause}
+        ORDER BY eb.file_path, eb.line, eb.exported_name, eb.local_name, eb.source_specifier;
+      `
+    );
+
+    return rows.map(mapStoredExportBinding);
+  }
+
+  public async listNamespaceSymbolNodes(filePath?: string): Promise<NamespaceSymbolNode[]> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE nsn.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          nsn.file_path,
+          nsn.path,
+          nsn.kind,
+          nsn.line,
+          nsn.parent_path,
+          nsn.local_name,
+          nsn.source_specifier,
+          nsn.export_kind
+        FROM namespace_symbol_nodes nsn
+        ${whereClause}
+        ORDER BY nsn.file_path, nsn.path, nsn.kind, nsn.line;
+      `
+    );
+
+    return rows.map(mapStoredNamespaceNode);
+  }
+
+  public async listNamespaceSymbolEdges(filePath?: string): Promise<NamespaceSymbolEdge[]> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE nse.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          nse.file_path,
+          nse.from_path,
+          nse.to_path,
+          nse.kind,
+          nse.line,
+          nse.target_symbol_name,
+          nse.target_specifier,
+          nse.evidence_json
+        FROM namespace_symbol_edges nse
+        ${whereClause}
+        ORDER BY nse.file_path, nse.from_path, nse.to_path, nse.kind, nse.line;
+      `
+    );
+
+    return rows.map(mapStoredNamespaceEdge);
+  }
+
+  public async listSymbolRankings(filePath?: string): Promise<SymbolCentralityScore[]> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE sr.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          sr.symbol_id,
+          sr.file_path,
+          sr.symbol_name,
+          sr.symbol_kind,
+          sr.score,
+          sr.normalized_score,
+          sr.incoming_reference_count,
+          sr.incoming_call_count,
+          sr.outgoing_call_count,
+          sr.namespace_export_count,
+          sr.evidence_json
+        FROM symbol_rankings sr
+        ${whereClause}
+        ORDER BY sr.score DESC, sr.file_path, sr.symbol_name;
+      `
+    );
+
+    return rows.map(mapStoredSymbolRanking);
+  }
+
   public async listSymbolReferences(filePath?: string): Promise<Array<SymbolReference & { filePath: string }>> {
     await this.ensureReady();
     const whereClause = filePath ? `WHERE sr.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
@@ -693,6 +1272,34 @@ export class SQLiteIndexStore {
     );
 
     return rows.map(mapStoredReference);
+  }
+
+  public async listScopeBindings(filePath?: string): Promise<Array<ScopeBinding & { filePath: string }>> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE sb.file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          sb.file_path,
+          sb.name,
+          sb.kind,
+          sb.line,
+          sb.scope_start_line,
+          sb.scope_end_line,
+          sb.container_name,
+          sb.type_name,
+          sb.source_specifier,
+          sb.imported_name,
+          sb.symbol_kind,
+          sb.evidence
+        FROM scope_bindings sb
+        ${whereClause}
+        ORDER BY sb.file_path, sb.line, sb.kind, sb.name;
+      `
+    );
+
+    return rows.map(mapStoredScopeBinding);
   }
 
   public async listSymbolLinks(filePath?: string): Promise<SymbolLink[]> {
@@ -721,6 +1328,68 @@ export class SQLiteIndexStore {
     );
 
     return rows.map(mapStoredLink);
+  }
+
+  public async listSymbolCalls(filePath?: string): Promise<SymbolCallEdge[]> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE sc.caller_file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          sc.caller_file_path,
+          sc.caller_symbol_name,
+          sc.caller_symbol_kind,
+          sc.caller_symbol_id,
+          sc.caller_line,
+          sc.callee_file_path,
+          sc.callee_symbol_name,
+          sc.callee_symbol_kind,
+          sc.callee_symbol_id,
+          sc.callee_specifier,
+          sc.reference_kind,
+          sc.resolution,
+          sc.confidence,
+          sc.evidence_json
+        FROM symbol_calls sc
+        ${whereClause}
+        ORDER BY sc.caller_file_path, sc.caller_line, sc.caller_symbol_name, sc.callee_symbol_name, sc.callee_file_path, sc.callee_specifier;
+      `
+    );
+
+    return rows.map(mapStoredCall);
+  }
+
+  public async listSymbolReferenceEdges(filePath?: string): Promise<SymbolReferenceEdge[]> {
+    await this.ensureReady();
+    const whereClause = filePath ? `WHERE sre.source_file_path = ${toSqlLiteral(normalizePath(filePath))}` : "";
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT
+          sre.source_file_path,
+          sre.source_symbol_name,
+          sre.source_symbol_kind,
+          sre.source_symbol_id,
+          sre.source_line,
+          sre.source_reference_name,
+          sre.source_reference_kind,
+          sre.source_qualifier,
+          sre.target_file_path,
+          sre.target_symbol_name,
+          sre.target_symbol_kind,
+          sre.target_symbol_id,
+          sre.target_specifier,
+          sre.resolution,
+          sre.confidence,
+          sre.evidence_json
+        FROM symbol_reference_edges sre
+        ${whereClause}
+        ORDER BY sre.source_file_path, sre.source_line, sre.source_symbol_name, sre.source_reference_name, sre.target_symbol_id, sre.target_specifier;
+      `
+    );
+
+    return rows.map(mapStoredReferenceEdge);
   }
 
   public async listDependencies(filePath?: string): Promise<Array<DependencyGraphEdge & { isInternal: boolean }>> {
@@ -800,6 +1469,19 @@ export class SQLiteIndexStore {
     return rows[0] ? Number(rows[0].count) : 0;
   }
 
+  private async getMetadataValue(key: string): Promise<string | undefined> {
+    const rows = await querySqlite(
+      this.dbPath,
+      `
+        SELECT value
+        FROM repository_metadata
+        WHERE key = ${toSqlLiteral(key)}
+        LIMIT 1;
+      `
+    );
+    return rows[0]?.value === undefined || rows[0]?.value === null ? undefined : String(rows[0].value);
+  }
+
   private async persistKnowledgePoints(timestamp: string): Promise<void> {
     const statements = knowledgePoints.map((point) => {
       return `
@@ -845,7 +1527,13 @@ export class SQLiteIndexStore {
       .filter((file) => existingHashes.get(file.path) !== file.hash)
       .map((file) => file.path);
     const existingReferenceCount = await this.countRows("symbol_references");
+    const existingReferenceEdgeCount = await this.countRows("symbol_reference_edges");
+    const existingNamespaceNodeCount = await this.countRows("namespace_symbol_nodes");
+    const existingNamespaceEdgeCount = await this.countRows("namespace_symbol_edges");
+    const existingScopeBindingCount = await this.countRows("scope_bindings");
     const existingSymbolLinkCount = await this.countRows("symbol_links");
+    const existingSymbolCallCount = await this.countRows("symbol_calls");
+    const existingStructureIndexVersion = await this.getMetadataValue("structure_index_version");
     const removedPaths = [...existingPaths].filter((filePath) => !currentPaths.has(filePath)).sort((left, right) =>
       left.localeCompare(right)
     );
@@ -854,16 +1542,33 @@ export class SQLiteIndexStore {
     const fileMap = generateFileMap(scanResult);
     const knowledgeResult = await matchKnowledge(scanResult);
     const structureBackfillNeeded =
-      scanResult.files.length > 0 && (existingReferenceCount === 0 || existingSymbolLinkCount === 0);
+      scanResult.files.length > 0 &&
+      (existingReferenceCount === 0 ||
+        existingReferenceEdgeCount === 0 ||
+        existingNamespaceNodeCount === 0 ||
+        existingNamespaceEdgeCount === 0 ||
+        existingScopeBindingCount === 0 ||
+        existingSymbolLinkCount === 0 ||
+        existingSymbolCallCount === 0 ||
+        existingStructureIndexVersion !== STRUCTURE_INDEX_VERSION);
     const structureChanged = changedPaths.length > 0 || removedPaths.length > 0 || structureBackfillNeeded;
     const symbolResult = structureChanged
       ? await extractRepositorySymbols(scanResult)
-      : { root: scanResult.root, files: [] as FileAnalysis[], diagnostics: [] };
+      : {
+          root: scanResult.root,
+          files: [] as FileAnalysis[],
+          namespaces: { root: scanResult.root, nodes: [] as NamespaceSymbolNode[], edges: [] as NamespaceSymbolEdge[], diagnostics: [] },
+          coreSymbols: { root: scanResult.root, rankings: [] as SymbolCentralityScore[], diagnostics: [] },
+          links: [] as SymbolLink[],
+          referenceEdges: [] as SymbolReferenceEdge[],
+          calls: [] as SymbolCallEdge[],
+          diagnostics: []
+        };
     const dependencyGraph = structureChanged
       ? buildDependencyGraph(scanResult.root, symbolResult.files)
       : { root: scanResult.root, nodes: [], edges: [] as DependencyGraphEdge[], diagnostics: [] };
     const symbolLinkGraph = structureChanged
-      ? buildSymbolLinks(scanResult.root, symbolResult.files, dependencyGraph)
+      ? buildSymbolLinks(scanResult.root, symbolResult.files, dependencyGraph, symbolResult.namespaces)
       : { root: scanResult.root, links: [] as SymbolLink[], diagnostics: [] };
     const previousProjectDetection = await this.getProjectDetection();
     const timestamp = nowIso();
@@ -871,16 +1576,50 @@ export class SQLiteIndexStore {
 
     const fileRolesByPath = new Map(fileMap.files.map((file) => [file.path, file]));
     const analysesByPath = new Map(symbolResult.files.map((analysis) => [analysis.filePath, analysis]));
+    const symbolRankingsByPath = new Map<string, SymbolCentralityScore[]>();
+    const namespaceNodesByPath = new Map<string, NamespaceSymbolNode[]>();
+    const namespaceEdgesByPath = new Map<string, NamespaceSymbolEdge[]>();
+    const exportBindingsByPath = new Map<string, ExportBinding[]>();
     const referencesByPath = new Map<string, SymbolReference[]>();
     const linksByPath = new Map<string, SymbolLink[]>();
+    const referenceEdgesByPath = new Map<string, SymbolReferenceEdge[]>();
+    const scopeBindingsByPath = new Map<string, ScopeBinding[]>();
+    const callsByPath = new Map<string, SymbolCallEdge[]>();
     const dependenciesByPath = new Map<string, DependencyGraphEdge[]>();
     for (const analysis of symbolResult.files) {
+      exportBindingsByPath.set(analysis.filePath, analysis.exportBindings);
       referencesByPath.set(analysis.filePath, analysis.references);
+      scopeBindingsByPath.set(analysis.filePath, analysis.scopeBindings);
+    }
+    for (const node of symbolResult.namespaces.nodes) {
+      const bucket = namespaceNodesByPath.get(node.filePath) ?? [];
+      bucket.push(node);
+      namespaceNodesByPath.set(node.filePath, bucket);
+    }
+    for (const edge of symbolResult.namespaces.edges) {
+      const bucket = namespaceEdgesByPath.get(edge.filePath) ?? [];
+      bucket.push(edge);
+      namespaceEdgesByPath.set(edge.filePath, bucket);
+    }
+    for (const ranking of symbolResult.coreSymbols.rankings) {
+      const bucket = symbolRankingsByPath.get(ranking.filePath) ?? [];
+      bucket.push(ranking);
+      symbolRankingsByPath.set(ranking.filePath, bucket);
     }
     for (const link of symbolLinkGraph.links) {
       const bucket = linksByPath.get(link.sourceFilePath) ?? [];
       bucket.push(link);
       linksByPath.set(link.sourceFilePath, bucket);
+    }
+    for (const referenceEdge of symbolResult.referenceEdges) {
+      const bucket = referenceEdgesByPath.get(referenceEdge.sourceFilePath) ?? [];
+      bucket.push(referenceEdge);
+      referenceEdgesByPath.set(referenceEdge.sourceFilePath, bucket);
+    }
+    for (const call of symbolResult.calls) {
+      const bucket = callsByPath.get(call.callerFilePath) ?? [];
+      bucket.push(call);
+      callsByPath.set(call.callerFilePath, bucket);
     }
     for (const edge of dependencyGraph.edges) {
       const bucket = dependenciesByPath.get(edge.sourcePath) ?? [];
@@ -912,8 +1651,15 @@ export class SQLiteIndexStore {
       sqlStatements.push(`DELETE FROM files WHERE path = ${toSqlLiteral(removedPath)};`);
       sqlStatements.push(`DELETE FROM file_search WHERE file_path = ${toSqlLiteral(removedPath)};`);
       sqlStatements.push(`DELETE FROM symbols WHERE file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM symbol_rankings WHERE file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM namespace_symbol_nodes WHERE file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM namespace_symbol_edges WHERE file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM export_bindings WHERE file_path = ${toSqlLiteral(removedPath)};`);
       sqlStatements.push(`DELETE FROM symbol_references WHERE file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM scope_bindings WHERE file_path = ${toSqlLiteral(removedPath)};`);
       sqlStatements.push(`DELETE FROM symbol_links WHERE source_file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM symbol_reference_edges WHERE source_file_path = ${toSqlLiteral(removedPath)};`);
+      sqlStatements.push(`DELETE FROM symbol_calls WHERE caller_file_path = ${toSqlLiteral(removedPath)};`);
       sqlStatements.push(`DELETE FROM dependencies WHERE source_path = ${toSqlLiteral(removedPath)};`);
     }
 
@@ -969,12 +1715,25 @@ export class SQLiteIndexStore {
 
     for (const filePath of refreshStructurePaths) {
       const analysis = analysesByPath.get(filePath);
+      const namespaceNodes = namespaceNodesByPath.get(filePath) ?? [];
+      const namespaceEdges = namespaceEdgesByPath.get(filePath) ?? [];
+      const exportBindings = exportBindingsByPath.get(filePath) ?? [];
       const references = referencesByPath.get(filePath) ?? [];
+      const scopeBindings = scopeBindingsByPath.get(filePath) ?? [];
       const links = linksByPath.get(filePath) ?? [];
+      const referenceEdges = referenceEdgesByPath.get(filePath) ?? [];
+      const calls = callsByPath.get(filePath) ?? [];
       const dependencies = dependenciesByPath.get(filePath) ?? [];
       sqlStatements.push(`DELETE FROM symbols WHERE file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM symbol_rankings WHERE file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM namespace_symbol_nodes WHERE file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM namespace_symbol_edges WHERE file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM export_bindings WHERE file_path = ${toSqlLiteral(filePath)};`);
       sqlStatements.push(`DELETE FROM symbol_references WHERE file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM scope_bindings WHERE file_path = ${toSqlLiteral(filePath)};`);
       sqlStatements.push(`DELETE FROM symbol_links WHERE source_file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM symbol_reference_edges WHERE source_file_path = ${toSqlLiteral(filePath)};`);
+      sqlStatements.push(`DELETE FROM symbol_calls WHERE caller_file_path = ${toSqlLiteral(filePath)};`);
       sqlStatements.push(`DELETE FROM dependencies WHERE source_path = ${toSqlLiteral(filePath)};`);
 
       if (!analysis) {
@@ -999,6 +1758,116 @@ export class SQLiteIndexStore {
         );
       }
 
+      for (const ranking of symbolRankingsByPath.get(filePath) ?? []) {
+        sqlStatements.push(
+          `
+            INSERT INTO symbol_rankings(
+              symbol_id,
+              file_path,
+              symbol_name,
+              symbol_kind,
+              score,
+              normalized_score,
+              incoming_reference_count,
+              incoming_call_count,
+              outgoing_call_count,
+              namespace_export_count,
+              evidence_json,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(ranking.symbolId)},
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(ranking.symbolName)},
+              ${toSqlLiteral(ranking.symbolKind)},
+              ${ranking.score},
+              ${ranking.normalizedScore},
+              ${ranking.incomingReferenceCount},
+              ${ranking.incomingCallCount},
+              ${ranking.outgoingCallCount},
+              ${ranking.namespaceExportCount},
+              ${toSqlLiteral(jsonValue(ranking.evidence))},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const namespaceNode of namespaceNodes) {
+        sqlStatements.push(
+          `
+            INSERT INTO namespace_symbol_nodes(
+              file_path,
+              path,
+              kind,
+              line,
+              parent_path,
+              local_name,
+              source_specifier,
+              export_kind,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(namespaceNode.path)},
+              ${toSqlLiteral(namespaceNode.kind)},
+              ${namespaceNode.line},
+              ${namespaceNode.parentPath ? toSqlLiteral(namespaceNode.parentPath) : "NULL"},
+              ${namespaceNode.localName ? toSqlLiteral(namespaceNode.localName) : "NULL"},
+              ${namespaceNode.sourceSpecifier ? toSqlLiteral(namespaceNode.sourceSpecifier) : "NULL"},
+              ${namespaceNode.exportKind ? toSqlLiteral(namespaceNode.exportKind) : "NULL"},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const namespaceEdge of namespaceEdges) {
+        sqlStatements.push(
+          `
+            INSERT INTO namespace_symbol_edges(
+              file_path,
+              from_path,
+              to_path,
+              kind,
+              line,
+              target_symbol_name,
+              target_specifier,
+              evidence_json,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(namespaceEdge.fromPath)},
+              ${toSqlLiteral(namespaceEdge.toPath)},
+              ${toSqlLiteral(namespaceEdge.kind)},
+              ${namespaceEdge.line},
+              ${namespaceEdge.targetSymbolName ? toSqlLiteral(namespaceEdge.targetSymbolName) : "NULL"},
+              ${namespaceEdge.targetSpecifier ? toSqlLiteral(namespaceEdge.targetSpecifier) : "NULL"},
+              ${toSqlLiteral(jsonValue(namespaceEdge.evidence))},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const exportBinding of exportBindings) {
+        sqlStatements.push(
+          `
+            INSERT INTO export_bindings(file_path, exported_name, local_name, source_specifier, kind, line, updated_at)
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(exportBinding.exportedName)},
+              ${exportBinding.localName ? toSqlLiteral(exportBinding.localName) : "NULL"},
+              ${exportBinding.sourceSpecifier ? toSqlLiteral(exportBinding.sourceSpecifier) : "NULL"},
+              ${toSqlLiteral(exportBinding.kind)},
+              ${exportBinding.line},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
       for (const reference of references) {
         sqlStatements.push(
           `
@@ -1010,6 +1879,43 @@ export class SQLiteIndexStore {
               ${reference.line},
               ${reference.containerName ? toSqlLiteral(reference.containerName) : "NULL"},
               ${toSqlLiteral(reference.evidence)},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const scopeBinding of scopeBindings) {
+        sqlStatements.push(
+          `
+            INSERT INTO scope_bindings(
+              file_path,
+              name,
+              kind,
+              line,
+              scope_start_line,
+              scope_end_line,
+              container_name,
+              type_name,
+              source_specifier,
+              imported_name,
+              symbol_kind,
+              evidence,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(scopeBinding.name)},
+              ${toSqlLiteral(scopeBinding.kind)},
+              ${scopeBinding.line},
+              ${scopeBinding.scopeStartLine},
+              ${scopeBinding.scopeEndLine},
+              ${scopeBinding.containerName ? toSqlLiteral(scopeBinding.containerName) : "NULL"},
+              ${scopeBinding.typeName ? toSqlLiteral(scopeBinding.typeName) : "NULL"},
+              ${scopeBinding.sourceSpecifier ? toSqlLiteral(scopeBinding.sourceSpecifier) : "NULL"},
+              ${scopeBinding.importedName ? toSqlLiteral(scopeBinding.importedName) : "NULL"},
+              ${scopeBinding.symbolKind ? toSqlLiteral(scopeBinding.symbolKind) : "NULL"},
+              ${toSqlLiteral(scopeBinding.evidence)},
               ${toSqlLiteral(timestamp)}
             );
           `
@@ -1047,6 +1953,92 @@ export class SQLiteIndexStore {
               ${toSqlLiteral(link.resolution)},
               ${link.confidence},
               ${toSqlLiteral(jsonValue(link.evidence))},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const referenceEdge of referenceEdges) {
+        sqlStatements.push(
+          `
+            INSERT INTO symbol_reference_edges(
+              source_file_path,
+              source_symbol_name,
+              source_symbol_kind,
+              source_symbol_id,
+              source_line,
+              source_reference_name,
+              source_reference_kind,
+              source_qualifier,
+              target_file_path,
+              target_symbol_name,
+              target_symbol_kind,
+              target_symbol_id,
+              target_specifier,
+              resolution,
+              confidence,
+              evidence_json,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(referenceEdge.sourceSymbolName)},
+              ${toSqlLiteral(referenceEdge.sourceSymbolKind)},
+              ${toSqlLiteral(referenceEdge.sourceSymbolId)},
+              ${referenceEdge.sourceLine},
+              ${toSqlLiteral(referenceEdge.sourceReferenceName)},
+              ${toSqlLiteral(referenceEdge.sourceReferenceKind)},
+              ${referenceEdge.sourceQualifier ? toSqlLiteral(referenceEdge.sourceQualifier) : "NULL"},
+              ${referenceEdge.targetFilePath ? toSqlLiteral(referenceEdge.targetFilePath) : "NULL"},
+              ${referenceEdge.targetSymbolName ? toSqlLiteral(referenceEdge.targetSymbolName) : "NULL"},
+              ${referenceEdge.targetSymbolKind ? toSqlLiteral(referenceEdge.targetSymbolKind) : "NULL"},
+              ${referenceEdge.targetSymbolId ? toSqlLiteral(referenceEdge.targetSymbolId) : "NULL"},
+              ${referenceEdge.targetSpecifier ? toSqlLiteral(referenceEdge.targetSpecifier) : "NULL"},
+              ${toSqlLiteral(referenceEdge.resolution)},
+              ${referenceEdge.confidence},
+              ${toSqlLiteral(jsonValue(referenceEdge.evidence))},
+              ${toSqlLiteral(timestamp)}
+            );
+          `
+        );
+      }
+
+      for (const call of calls) {
+        sqlStatements.push(
+          `
+            INSERT INTO symbol_calls(
+              caller_file_path,
+              caller_symbol_name,
+              caller_symbol_kind,
+              caller_symbol_id,
+              caller_line,
+              callee_file_path,
+              callee_symbol_name,
+              callee_symbol_kind,
+              callee_symbol_id,
+              callee_specifier,
+              reference_kind,
+              resolution,
+              confidence,
+              evidence_json,
+              updated_at
+            )
+            VALUES (
+              ${toSqlLiteral(filePath)},
+              ${toSqlLiteral(call.callerSymbolName)},
+              ${toSqlLiteral(call.callerSymbolKind)},
+              ${toSqlLiteral(call.callerSymbolId)},
+              ${call.callerLine},
+              ${call.calleeFilePath ? toSqlLiteral(call.calleeFilePath) : "NULL"},
+              ${toSqlLiteral(call.calleeSymbolName)},
+              ${call.calleeSymbolKind ? toSqlLiteral(call.calleeSymbolKind) : "NULL"},
+              ${call.calleeSymbolId ? toSqlLiteral(call.calleeSymbolId) : "NULL"},
+              ${call.calleeSpecifier ? toSqlLiteral(call.calleeSpecifier) : "NULL"},
+              ${toSqlLiteral(call.referenceKind)},
+              ${toSqlLiteral(call.resolution)},
+              ${call.confidence},
+              ${toSqlLiteral(jsonValue(call.evidence))},
               ${toSqlLiteral(timestamp)}
             );
           `
@@ -1161,10 +2153,32 @@ export class SQLiteIndexStore {
       const role = fileRolesByPath.get(filePath);
       const matches = knowledgeByFilePath.get(filePath) ?? [];
       const analysis = analysesByPath.get(filePath);
+      const symbolRankings = symbolRankingsByPath.get(filePath) ?? [];
+      const namespaceNodes = namespaceNodesByPath.get(filePath) ?? [];
+      const namespaceEdges = namespaceEdgesByPath.get(filePath) ?? [];
+      const exportBindings = exportBindingsByPath.get(filePath) ?? [];
+      const scopeBindings = scopeBindingsByPath.get(filePath) ?? [];
       const references = referencesByPath.get(filePath) ?? [];
+      const referenceEdges = referenceEdgesByPath.get(filePath) ?? [];
       const links = linksByPath.get(filePath) ?? [];
+      const calls = callsByPath.get(filePath) ?? [];
       const dependencies = dependenciesByPath.get(filePath) ?? [];
-      const searchText = buildSearchText(file, role, matches, analysis?.symbols ?? [], dependencies, references, links);
+      const searchText = buildSearchText(
+        file,
+        role,
+        matches,
+        analysis?.symbols ?? [],
+        symbolRankings,
+        namespaceNodes,
+        namespaceEdges,
+        exportBindings,
+        scopeBindings,
+        dependencies,
+        references,
+        referenceEdges,
+        links,
+        calls
+      );
 
       sqlStatements.push(`DELETE FROM file_search WHERE file_path = ${toSqlLiteral(filePath)};`);
 
@@ -1210,7 +2224,8 @@ export class SQLiteIndexStore {
         VALUES
           ('root', ${toSqlLiteral(this.root)}, ${toSqlLiteral(timestamp)}),
           ('db_path', ${toSqlLiteral(this.dbPath)}, ${toSqlLiteral(timestamp)}),
-          ('last_indexed_at', ${toSqlLiteral(timestamp)}, ${toSqlLiteral(timestamp)})
+          ('last_indexed_at', ${toSqlLiteral(timestamp)}, ${toSqlLiteral(timestamp)}),
+          ('structure_index_version', ${toSqlLiteral(STRUCTURE_INDEX_VERSION)}, ${toSqlLiteral(timestamp)})
         ON CONFLICT(key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at;
@@ -1221,8 +2236,13 @@ export class SQLiteIndexStore {
     await executeSqlite(this.dbPath, sqlStatements.join("\n"));
 
     const persistedSymbolCount = await this.countRows("symbols");
+    const persistedCoreSymbolCount = await this.countRows("symbol_rankings");
     const persistedReferenceCount = await this.countRows("symbol_references");
+    const persistedNamespaceNodeCount = await this.countRows("namespace_symbol_nodes");
+    const persistedNamespaceEdgeCount = await this.countRows("namespace_symbol_edges");
+    const persistedScopeBindingCount = await this.countRows("scope_bindings");
     const persistedSymbolLinkCount = await this.countRows("symbol_links");
+    const persistedSymbolCallCount = await this.countRows("symbol_calls");
     const persistedDependencyCount = await this.countRows("dependencies");
 
     return {
@@ -1233,8 +2253,13 @@ export class SQLiteIndexStore {
       removedFiles: removedPaths.length,
       knowledgeMatchCount: knowledgeResult.matches.length,
       symbolCount: persistedSymbolCount,
+      coreSymbolCount: persistedCoreSymbolCount,
       referenceCount: persistedReferenceCount,
+      namespaceNodeCount: persistedNamespaceNodeCount,
+      namespaceEdgeCount: persistedNamespaceEdgeCount,
+      scopeBindingCount: persistedScopeBindingCount,
       symbolLinkCount: persistedSymbolLinkCount,
+      symbolCallCount: persistedSymbolCallCount,
       dependencyCount: persistedDependencyCount,
       diagnosticCount:
         scanResult.diagnostics.length +
@@ -1288,6 +2313,38 @@ export async function listSymbols(
   return store.listSymbols(filePath);
 }
 
+export async function listExportBindings(
+  rootPath: string,
+  filePath?: string
+): Promise<Array<ExportBinding & { filePath: string }>> {
+  const store = await createIndexStore(rootPath);
+  return store.listExportBindings(filePath);
+}
+
+export async function listNamespaceSymbolNodes(
+  rootPath: string,
+  filePath?: string
+): Promise<NamespaceSymbolNode[]> {
+  const store = await createIndexStore(rootPath);
+  return store.listNamespaceSymbolNodes(filePath);
+}
+
+export async function listNamespaceSymbolEdges(
+  rootPath: string,
+  filePath?: string
+): Promise<NamespaceSymbolEdge[]> {
+  const store = await createIndexStore(rootPath);
+  return store.listNamespaceSymbolEdges(filePath);
+}
+
+export async function listSymbolRankings(
+  rootPath: string,
+  filePath?: string
+): Promise<SymbolCentralityScore[]> {
+  const store = await createIndexStore(rootPath);
+  return store.listSymbolRankings(filePath);
+}
+
 export async function listSymbolReferences(
   rootPath: string,
   filePath?: string
@@ -1296,9 +2353,27 @@ export async function listSymbolReferences(
   return store.listSymbolReferences(filePath);
 }
 
+export async function listScopeBindings(
+  rootPath: string,
+  filePath?: string
+): Promise<Array<ScopeBinding & { filePath: string }>> {
+  const store = await createIndexStore(rootPath);
+  return store.listScopeBindings(filePath);
+}
+
 export async function listSymbolLinks(rootPath: string, filePath?: string): Promise<SymbolLink[]> {
   const store = await createIndexStore(rootPath);
   return store.listSymbolLinks(filePath);
+}
+
+export async function listSymbolCalls(rootPath: string, filePath?: string): Promise<SymbolCallEdge[]> {
+  const store = await createIndexStore(rootPath);
+  return store.listSymbolCalls(filePath);
+}
+
+export async function listSymbolReferenceEdges(rootPath: string, filePath?: string): Promise<SymbolReferenceEdge[]> {
+  const store = await createIndexStore(rootPath);
+  return store.listSymbolReferenceEdges(filePath);
 }
 
 export async function listDependencies(
